@@ -1,0 +1,28 @@
+# ── secrets / credentials — NEVER commit ────────────────────────────────────
+*.key
+*.pem
+.env*
+.install_creds*
+.bridge_token
+*registry*
+registry_id
+usage.db*
+*.sqlite*
+
+# ── python / build bloat ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.bak*
+*.zip
+reader/out/
+
+# ── local artifacts / proofs / runtime — never commit ───────────────────────
+proofs/
+installer/tests/sandboxes/
+installer_config.local.yaml
+.botzy-tokenizer/
+
+# ── hard guard: backend components must never be committed to this client repo ─
+builder/
+server/
+backend_*/

@@ -1,0 +1,53 @@
+/* BOTZY TOKENIZER — panel.css (injected on claude.ai only, via manifest) */
+
+#botzy-mascot {
+  position: fixed; bottom: 24px; right: 24px; z-index: 2147483646;
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 2px solid #282846; background: #fff; cursor: pointer; padding: 2px;
+}
+#botzy-mascot img { width: 100%; height: 100%; display: block; }
+#botzy-mascot.botzy-spike { animation: botzy-blink 0.4s linear infinite; }
+@keyframes botzy-blink {
+  50% { box-shadow: 0 0 16px 6px #ff3b30; background: #ffd2cf; }
+}
+
+#botzy-panel {
+  display: none; position: fixed; bottom: 92px; right: 24px; width: 340px;
+  max-height: 70vh; overflow: auto; z-index: 2147483647;
+  background: #1c1c2e; color: #f2f2f7; border: 1px solid #3a3a5c;
+  border-radius: 12px; font: 13px/1.45 system-ui, sans-serif;
+}
+#botzy-panel.botzy-open { display: block; }
+
+.botzy-head {
+  font-weight: 700; letter-spacing: 1px; padding: 10px 14px; background: #282846;
+}
+.botzy-tabs { display: flex; border-bottom: 1px solid #3a3a5c; }
+.botzy-tab {
+  flex: 1; background: none; border: none; color: #9a9ab8;
+  padding: 8px; cursor: pointer; font-weight: 600;
+}
+.botzy-tab.botzy-active { color: #ffaa28; border-bottom: 2px solid #ffaa28; }
+.botzy-tabbody { display: none; padding: 10px 14px; }
+.botzy-tabbody.botzy-active { display: block; }
+
+.botzy-row { display: flex; justify-content: space-between; padding: 3px 0; }
+.botzy-row .botzy-val { font-weight: 700; }
+.botzy-warn { color: #ffaa28; }
+
+table.botzy-log { width: 100%; border-collapse: collapse; }
+table.botzy-log th, table.botzy-log td {
+  text-align: left; padding: 2px 4px; border-bottom: 1px solid #2c2c4a;
+}
+tr.botzy-spikerow td { color: #ff6b60; font-weight: 700; }
+
+.botzy-settings { border-top: 1px solid #3a3a5c; padding: 10px 14px; }
+.botzy-settings label {
+  display: flex; justify-content: space-between; align-items: center; padding: 3px 0;
+}
+.botzy-settings input[type=number] {
+  width: 80px; background: #11111e; color: #f2f2f7;
+  border: 1px solid #3a3a5c; border-radius: 4px; padding: 2px 6px;
+}
+
+#botzy-proof { display: none; }

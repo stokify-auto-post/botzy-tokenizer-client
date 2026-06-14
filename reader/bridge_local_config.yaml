@@ -1,0 +1,21 @@
+# bridge_local_config.yaml — Gate 1 localhost bridge (R13)
+#
+# SAFETY: 127.0.0.1-ONLY, GET-only, token+origin gated, numbers/state only.
+# This file carries NO secret — the bridge token lives in token_file (0600),
+# minted+printed once by local_bridge.py on first run for the user to paste
+# into the widget settings (locked design: reader mints, user pastes).
+#
+# allowed_extension_origin MUST be set to the REAL unpacked-extension id AFTER
+# you load the widget (chrome://extensions -> Developer mode -> Load unpacked ->
+# copy the ID). Until then it stays the REPLACE placeholder, which can NEVER
+# match a real chrome-extension origin -> every request is denied 403
+# (fail-closed). One-line edit, no restart needed beyond re-running the bridge.
+
+bind_host: "127.0.0.1"
+port: 8765
+# token_file: leave unset → local_bridge.py defaults to "<reader-dir>/.bridge_token"
+#             (minted 0600 on first run, then printed once for you to paste into the widget).
+allowed_extension_origin: "chrome-extension://REPLACE_WITH_EXTENSION_ID"
+state_path: "/v1/state"
+dtach_dir: "/tmp"
+dtach_prefix: "dtach-"

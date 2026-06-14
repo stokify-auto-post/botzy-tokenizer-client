@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Botzy Tokenizer",
+  "version": "0.3.1",
+  "description": "Live local Claude usage + spike alerts. Reads usage numbers and message lengths only - never conversation content.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://claude.ai/*", "http://127.0.0.1:8765/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["config.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/mascot.png"],
+      "matches": ["https://claude.ai/*"]
+    }
+  ]
+}

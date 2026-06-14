@@ -1,0 +1,23 @@
+# installer_config.yaml — single source of truth for the installer (R13).
+# Every script (setup.sh, setup.ps1, uninstall.*, send_feedback.*) reads THIS
+# file. No endpoints/paths/ports are baked into the bash/PowerShell scripts.
+#
+# Edit a value HERE, never in a script.
+
+server_base:    "https://admin.botzify.co"
+enroll_path:    "/tokenizer/v1/enroll/self"
+wipe_path:      "/tokenizer/v1/wipe/self"
+feedback_path:  "/tokenizer/v1/feedback"     # may not be live server-side yet —
+                                             # client queues notes locally on 404
+
+# bridge_port: localhost reader<->widget bridge.
+# NOTE: 8765 is PINNED — it MUST match the widget, which hardcodes it in three
+# places: widget/manifest.json host_permissions (http://127.0.0.1:8765/*),
+# widget/config.js (port: 8765), widget/background.js (fallback 8765). Changing
+# this number here WITHOUT updating the widget silently breaks the bridge.
+bridge_port:    8765
+
+reader_log_dir: "${HOME}/.botzy-tokenizer/logs"     # 0700
+creds_path:     "${HOME}/.botzy-tokenizer/creds.json"   # 0600
+state_path:     "${HOME}/.botzy-tokenizer/state.json"   # 0600
+poll_seconds:   300

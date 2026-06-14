@@ -1,0 +1,37 @@
+# usage_rates.yaml — cost rates for the local log-reader
+# (R13: nothing hardcoded — edit HERE, not in code).
+#
+# ALL rates are EDITABLE DEFAULTS, seeded from Anthropic's published API pricing
+# (as cached 2026-05/06 — verify at https://platform.claude.com/docs/en/pricing.md
+#  when Anthropic announces new models/prices).
+# Units: USD per 1,000,000 tokens (per MTok).
+#   input        — uncached input tokens (usage.input_tokens)
+#   output       — output tokens          (usage.output_tokens)
+#   cache_write  — cache-creation tokens  (usage.cache_creation_input_tokens) ≈ 1.25x input (5-min TTL)
+#   cache_read   — cache-read tokens      (usage.cache_read_input_tokens)     ≈ 0.10x input
+#
+# cost_inr = Σ over the 4 buckets of (tokens / 1e6 × rate_usd) × usd_inr
+
+usd_inr: 86.0          # EDITABLE: USD→INR conversion used for cost_inr
+
+families:
+  opus:                # claude-opus-4-x (4.5 / 4.6 / 4.7 / 4.8 — same published price)
+    input: 5.00
+    output: 25.00
+    cache_write: 6.25
+    cache_read: 0.50
+  sonnet:              # claude-sonnet-4-x
+    input: 3.00
+    output: 15.00
+    cache_write: 3.75
+    cache_read: 0.30
+  haiku:               # claude-haiku-4-5 (Botzy default: claude-haiku-4-5-20251001)
+    input: 1.00
+    output: 5.00
+    cache_write: 1.25
+    cache_read: 0.10
+  unknown:             # fallback when model string matches no family — priced as opus
+    input: 5.00        # (worst case, so unknown traffic is never silently undercounted)
+    output: 25.00
+    cache_write: 6.25
+    cache_read: 0.50
