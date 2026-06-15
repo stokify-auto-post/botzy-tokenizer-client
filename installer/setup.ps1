@@ -59,9 +59,15 @@ try {
   # -------- STEP 1 pre-flight
   Step 1 "pre-flight checks"
   if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Die "python is required (python.exe on PATH)." }
-  $pyv = (python -c "import sys;print('%d.%d'%sys.version_info[:2])")
-  $okpy = (python -c "import sys;sys.exit(0 if sys.version_info[:2]>=(3,9) else 1)"; $LASTEXITCODE -eq 0)
-  if (-not $okpy) { Die "python >= 3.9 required (have $pyv)." }
+  # parse python version PS-native (no inline Python: tuples/quotes inside a PS
+  # string break the parser on real Windows PowerShell 5.1).
+  $raw = (& python --version 2>&1 | Out-String).Trim()   # e.g. "Python 3.14.0"
+  if (-not $raw -or $raw -notmatch 'Python\s+(\d+)\.(\d+)') {
+    Die "python >= 3.9 required but its version could not be determined (got '$raw')."
+  }
+  $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+  $pyv = "$maj.$min"
+  if ($maj -lt 3 -or ($maj -eq 3 -and $min -lt 9)) { Die "python >= 3.9 required (have $pyv)." }
   Say "  os: windows ; python $pyv"
 
   # -------- STEP 2 idempotency

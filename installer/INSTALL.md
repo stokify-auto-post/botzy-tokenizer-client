@@ -45,8 +45,33 @@ follow those two clicks. That's the whole install.
 
 ## Path B — Installing it yourself (manual)
 
-- **Linux / Mac / WSL2:** `bash setup.sh`
-- **Windows (native):** `.\setup.ps1`
+**Prereqs:** Python 3.9+ and git. On Windows you can install both with winget:
+
+```powershell
+winget install --id Python.Python.3.12 -e
+winget install --id Git.Git -e
+```
+
+(No Node.js needed — the reader is pure Python and the widget loads unpacked.)
+
+### Linux / Mac / WSL2
+
+```bash
+bash setup.sh
+```
+
+### Windows (native PowerShell)
+
+```powershell
+git clone https://github.com/stokify-auto-post/botzy-tokenizer-client.git
+cd botzy-tokenizer-client\installer
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\setup.ps1
+```
+
+> `Set-ExecutionPolicy Bypass -Scope Process -Force` lets THIS PowerShell window
+> run the installer; it resets when you close the window. (`Bypass` must come
+> first — `-Scope Process -Bypass` errors on PowerShell 5.1.)
 
 The script will, in order: take backups → install the reader →
 register the auto-start service (user-level, no sudo) → self-enroll →

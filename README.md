@@ -138,6 +138,22 @@ feedback-404-queues). `test_live_smoke.sh` is the **one** live test: a sandboxed
 end-to-end enroll → `/health` → wipe against the enrollment server
 (enroll 201, creds 0600, /health 200, wipe ok, sandbox clean).
 
+### Changelog
+
+- **2026-06-15 — Windows installer fixes** (found via a real native-Windows
+  newcomer test: clean machine, Python 3.14 + git 2.54, no WSL):
+  - `setup.ps1` pre-flight Python check **rewritten PS-native** — the old inline
+    `python -c "...(3,9)..."` one-liners broke the PowerShell 5.1 *parser* (the
+    whole script failed to load). Now parses `python --version` in PowerShell, no
+    embedded Python. Both inline-interpreter blocks removed.
+  - `INSTALL.md` Path B (Windows): added the `Set-ExecutionPolicy Bypass -Scope
+    Process -Force` step in the correct order (`Bypass` positional first — the
+    `-Bypass` named form errors on PS 5.1), a copy-pasteable clone→`setup.ps1`
+    quick-start, and a prereqs box (Python 3.9+ + git; no Node.js).
+  - Verified on Linux via PowerShell structural lint (no inline interpreter
+    strings, balanced `(){}`, all `try` blocks have `catch`); native-Windows
+    re-test still recommended.
+
 ---
 
 ## Uninstall
