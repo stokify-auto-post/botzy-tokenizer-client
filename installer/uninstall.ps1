@@ -26,13 +26,23 @@ $WipeUrl     = "$ServerBase$WipePath"
 Say "Botzy Tokenizer uninstaller"
 Say "  install root: $InstallRoot"
 
-# 1. remove scheduled task
-$task = Get-ScheduledTask -TaskName "BotzyTokenizerReader" -ErrorAction SilentlyContinue
+# 1. remove auto-start (HKCU\...\Run) + any legacy scheduled task
+$RunKey  = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RunName = "BotzyTokenizerReader"
+$runVal  = $null
+try { $runVal = (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue).$RunName } catch {}
+if ($runVal) {
+  Remove-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue
+  Say "  [ok] auto-start Run entry removed"
+} else { Say "  (no Run entry - already removed)" }
+
+# legacy: older installs used a scheduled task - remove it if still present
+$task = Get-ScheduledTask -TaskName $RunName -ErrorAction SilentlyContinue
 if ($task) {
-  Stop-ScheduledTask  -TaskName "BotzyTokenizerReader" -ErrorAction SilentlyContinue
-  Unregister-ScheduledTask -TaskName "BotzyTokenizerReader" -Confirm:$false
-  Say "  [ok] scheduled task removed"
-} else { Say "  (no scheduled task - already removed)" }
+  Stop-ScheduledTask  -TaskName $RunName -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $RunName -Confirm:$false
+  Say "  [ok] legacy scheduled task removed"
+}
 
 # kill a no-service launched reader, if any
 $pidFile = Join-Path $InstallRoot "reader.pid"

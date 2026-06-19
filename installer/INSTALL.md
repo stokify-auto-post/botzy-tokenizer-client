@@ -11,15 +11,16 @@ You're installing Botzy Tokenizer for the user. Here's what it is:
   log files (`~/.claude/projects/**/*.jsonl`) for token counts, and a browser
   widget. Nothing else.
 - **What it does NOT do:** No API key access. No conversation content ever
-  leaves the machine — token counts only. No system files touched. No sudo
-  required (user-level systemd/launchd/Task Scheduler only).
+  leaves the machine — token counts only. No system files touched. No sudo /
+  admin required (user-level systemd/launchd on Linux/Mac; a per-user logon
+  entry — `HKCU\...\Run` — on Windows, so it never needs Administrator).
 - **Reversibility:** Every file touched is backed up first (`.bak_<timestamp>`)
   at every step before any change. One-line uninstall (`bash uninstall.sh`)
   removes everything: service unregistered, local files deleted, server-side
   data wiped via `/v1/wipe/self`. All backups left in place for the user.
 - **Server side:** Open-source client; server stores only token-count summaries
   keyed by a random 128-bit `registry_id`. Code at:
-  github.com/stokify-auto-post/botzy-tokenizer
+  github.com/stokify-auto-post/botzy-tokenizer-client
 
 We've designed this to be safe for the user at every level. If you spot
 anything that could make it safer — a missing check, a clearer prompt, a better
@@ -74,9 +75,15 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 > first — `-Scope Process -Bypass` errors on PowerShell 5.1.)
 
 The script will, in order: take backups → install the reader →
-register the auto-start service (user-level, no sudo) → self-enroll →
-open `chrome://extensions` in your browser → copy the widget folder path to
-your clipboard → print the 2 clicks to perform.
+register auto-start (user-level, no sudo/admin — a per-user `HKCU\...\Run`
+logon entry on Windows) → launch the reader hidden (no console window) →
+self-enroll → open `chrome://extensions` in your browser → copy the widget
+folder path to your clipboard → print the 2 clicks to perform.
+
+> On Windows the reader runs hidden via `pythonw.exe` and logs to
+> `%USERPROFILE%\.botzy-tokenizer\logs\reader.out`. If auto-start registration
+> ever fails, the installer says so plainly (no false "ok") and prints the exact
+> `shell:startup` fallback — the reader still runs for the current session.
 
 If a step fails it stops with a clear message and undoes only what *that run*
 created. Re-running is always safe (it refuses to double-install).

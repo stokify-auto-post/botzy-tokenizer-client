@@ -2,7 +2,7 @@
 """Botzy Tokenizer - Gate 1 localhost bridge. 127.0.0.1-ONLY, GET-only,
 token+origin gated, numbers/state only. No request body ever read. Relays
 already-numeric state only; discovered-knowledge LOGIC never touches this file."""
-import hmac, json, os, secrets, socket, stat as _stat
+import argparse, hmac, json, os, secrets, socket, stat as _stat, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     import yaml
@@ -84,7 +84,20 @@ def make_server(cfg,token):
         raise SystemExit("REFUSING: bind_host must be loopback, got %r" % host)
     return ThreadingHTTPServer((host,int(cfg["port"])), Handler)
 def main():
-    cfg=load_cfg(); token=ensure_token(cfg["token_file"]); httpd=make_server(cfg,token)
+    # --config: full absolute path so a logon-launched reader (arbitrary cwd)
+    # always finds its config. --logfile: when launched hidden (pythonw, no
+    # console) the startup banner + first-run pairing token would vanish; redirect
+    # them to this file so the installer smoke-test and the user can still see
+    # "bridge listening" and the token. Both optional → manual `python
+    # local_bridge.py` is unchanged (prints to stdout as before).
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default=DEFAULT_CFG)
+    ap.add_argument("--logfile", default=None)
+    args = ap.parse_args()
+    if args.logfile:
+        lf = open(args.logfile, "a", buffering=1, encoding="utf-8")  # line-buffered, append
+        sys.stdout = lf; sys.stderr = lf
+    cfg=load_cfg(args.config); token=ensure_token(cfg["token_file"]); httpd=make_server(cfg,token)
     print("bridge listening on %s:%s%s"%(cfg["bind_host"],cfg["port"],cfg["state_path"]),flush=True)
     try: httpd.serve_forever()
     except KeyboardInterrupt: httpd.shutdown()

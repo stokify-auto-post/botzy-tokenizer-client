@@ -137,26 +137,70 @@ try {
   if (Test-Path $CredsPath) { $RegId = (Get-Content $CredsPath -Raw | ConvertFrom-Json).registry_id }
   $RegShort = if ($RegId.Length -ge 8) { $RegId.Substring(0,8) + "..." } else { $RegId }
 
-  # -------- STEP 6 auto-start (Task Scheduler, user-level)
-  Step 6 "register auto-start (Task Scheduler, user-level)"
+  # -------- STEP 6 auto-start (per-user HKCU\...\Run — admin-less)
+  # Task Scheduler removed: Register-ScheduledTask needs admin on locked-down
+  # boxes (HRESULT 0x80070005) AND swallowed its own failure behind a false
+  # [ok]. HKCU\...\Run is per-user, needs NO admin, and runs hidden at logon
+  # via pythonw (no console). Every [ok] below is gated on a VERIFIED result.
+  Step 6 "register auto-start (per-user Run key, no admin)"
   $ReaderExec = Join-Path $ReaderDst "local_bridge.py"
-  if ($NoService) {
-    Say "  BOTZY_NO_SERVICE=1 - skipping Task Scheduler."
-    if (-not $DryRun) {
-      $p = Start-Process -FilePath "python" -ArgumentList "`"$ReaderExec`"" -WindowStyle Hidden -PassThru
-      $p.Id | Set-Content (Join-Path $InstallRoot "reader.pid")
-      Say "  reader launched (pid $($p.Id)), no scheduled task."
-    }
-  } elseif ($DryRun) {
-    Say "  (dryrun) would register scheduled task 'BotzyTokenizerReader' for: python $ReaderExec"
+  $ReaderCfg  = Join-Path $ReaderDst "bridge_local_config.yaml"
+  $ReaderOut  = Join-Path $LogDir "reader.out"
+  $PidFile    = Join-Path $InstallRoot "reader.pid"
+  $RunKey     = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+  $RunName    = "BotzyTokenizerReader"
+
+  # resolve pythonw.exe (no-console interpreter); fall back to python.exe hidden.
+  $pyw = (Get-Command pythonw -ErrorAction SilentlyContinue).Source
+  if (-not $pyw) {
+    $pyexe = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($pyexe) { $cand = $pyexe -replace 'python\.exe$','pythonw.exe'; if (Test-Path $cand) { $pyw = $cand } }
+  }
+  $Launcher     = if ($pyw) { $pyw } else { (Get-Command python).Source }
+  $HiddenViaPyw = [bool]$pyw
+  # FULL absolute --config + --logfile so a logon launch (arbitrary cwd) is robust.
+  $LaunchArgs   = "`"$ReaderExec`" --config `"$ReaderCfg`" --logfile `"$ReaderOut`""
+  $RunCmd       = "`"$Launcher`" $LaunchArgs"
+
+  if ($DryRun) {
+    Say "  (dryrun) would set $RunKey\$RunName = $RunCmd"
+    Say "  (dryrun) would launch reader hidden ($Launcher) + write $PidFile"
   } else {
-    $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$ReaderExec`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $set     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    Register-ScheduledTask -TaskName "BotzyTokenizerReader" -Action $action -Trigger $trigger `
-      -Settings $set -User $env:USERNAME -RunLevel Limited -Force | Out-Null
-    Start-ScheduledTask -TaskName "BotzyTokenizerReader"
-    Say "  [ok] scheduled task 'BotzyTokenizerReader' registered + started"
+    if ($NoService) {
+      Say "  BOTZY_NO_SERVICE=1 - skipping Run-key registration (reader still launched)."
+    } else {
+      # backup any existing Run value before overwriting (idempotent re-run)
+      $existing = $null
+      try { $existing = (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue).$RunName } catch {}
+      if ($existing) {
+        $existing | Set-Content (Join-Path $InstallRoot "run_key.bak_$TS")
+        Say "  [ok] backup: existing Run value -> $InstallRoot\run_key.bak_$TS"
+      }
+      $regOk = $false; $regErr = "unknown error"
+      try {
+        if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
+        New-ItemProperty -Path $RunKey -Name $RunName -Value $RunCmd -PropertyType String -Force | Out-Null
+        $verify = (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction Stop).$RunName
+        if ($verify -eq $RunCmd) { $regOk = $true } else { $regErr = "Run value did not verify after write" }
+      } catch { $regErr = $_.Exception.Message }
+      if ($regOk) {
+        Say "  [ok] auto-start registered (HKCU Run '$RunName') - starts hidden at next logon"
+      } else {
+        Say "  [x] auto-start NOT registered: $regErr"
+        Say "      reader still runs THIS session; to auto-start at logon, add a shortcut"
+        Say "      to 'shell:startup' (Win+R) targeting:  $RunCmd"
+      }
+    }
+
+    # launch the reader NOW so the widget + smoke test work immediately, hidden.
+    if (-not $HiddenViaPyw) { Say "  [!] pythonw.exe not found - using python.exe hidden (a console may flash)." }
+    try {
+      $p = Start-Process -FilePath $Launcher -ArgumentList $LaunchArgs -WindowStyle Hidden -PassThru
+      $p.Id | Set-Content $PidFile
+      Say "  [ok] reader launched (pid $($p.Id)), logging -> $ReaderOut"
+    } catch {
+      Die "could not launch reader: $($_.Exception.Message)"
+    }
   }
 
   # -------- STEP 7 smoke /health
@@ -171,7 +215,13 @@ try {
         if ($h.ok -eq $true) { $ok = $true; break }
       } catch { Start-Sleep -Seconds 1 }
     }
-    if (-not $ok) { Die "reader did not answer /health on 127.0.0.1:$BridgePort - see $LogDir\reader.out" }
+    if (-not $ok) {
+      if (Test-Path $ReaderOut) {
+        Say "  --- last lines of $ReaderOut ---"
+        Get-Content $ReaderOut -Tail 15 | ForEach-Object { Say "  | $_" }
+      } else { Say "  (no $ReaderOut yet - reader never produced output)" }
+      Die "reader did not answer /health on 127.0.0.1:$BridgePort (see $ReaderOut above)."
+    }
     Say "  [ok] reader healthy on 127.0.0.1:$BridgePort"
   }
 
