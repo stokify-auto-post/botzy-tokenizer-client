@@ -2,7 +2,7 @@
 """Botzy Tokenizer - Gate 1 localhost bridge. 127.0.0.1-ONLY, GET-only,
 token+origin gated, numbers/state only. No request body ever read. Relays
 already-numeric state only; discovered-knowledge LOGIC never touches this file."""
-import argparse, hmac, json, os, secrets, socket, stat as _stat, sys
+import argparse, hmac, json, os, secrets, socket, stat as _stat, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     import yaml
@@ -14,7 +14,8 @@ def load_cfg(path=DEFAULT_CFG):
     cfg = {"bind_host":"127.0.0.1","port":8765,
            "token_file":os.path.join(HERE,".bridge_token"),
            "allowed_extension_origin":"chrome-extension://REPLACE_WITH_EXTENSION_ID",
-           "state_path":"/v1/state","dtach_dir":"/tmp","dtach_prefix":"dtach-"}
+           "state_path":"/v1/state","pair_path":"/v1/pair",
+           "dtach_dir":"/tmp","dtach_prefix":"dtach-"}
     if yaml and os.path.exists(path):
         with open(path) as f: loaded = yaml.safe_load(f) or {}
         cfg.update({k:v for k,v in loaded.items() if v is not None})
@@ -52,11 +53,34 @@ def build_state(cfg):
             "dtach":collect_dtach_sessions(cfg)}
 class Handler(BaseHTTPRequestHandler):
     cfg=None; token=None
+    paired=False                 # one-time pairing window; closes after first success
+    _pair_lock=threading.Lock()  # ThreadingHTTPServer: serialise the close
     def _deny(self,code):
         self.send_response(code); self.send_header("Content-Type","application/json")
         self.send_header("Content-Length","2"); self.end_headers(); self.wfile.write(b"{}")
     def _ok(self,payload):
         body=json.dumps(payload).encode(); self.send_response(200)
+        self.send_header("Content-Type","application/json")
+        self.send_header("Access-Control-Allow-Origin", self.cfg["allowed_extension_origin"])
+        self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)
+    def _pair(self):
+        # AUTO-PAIR: one-time, loopback-only delivery of the bridge token so the
+        # widget never needs a manual paste. Two gates beyond the 127.0.0.1 bind:
+        #  (1) require the custom header X-Botzy-Pair. A web page CANNOT send a
+        #      custom header to a cross-origin loopback without a CORS preflight,
+        #      which we never approve (no Access-Control-Allow-Headers / OPTIONS
+        #      -> 501) — so only the extension service-worker (host_permission =
+        #      no preflight) can deliver it. A page's plain "simple" GET (no
+        #      header) is rejected WITHOUT consuming the window.
+        #  (2) one-time: after the first success `paired` flips True and every
+        #      later /v1/pair returns 403 — a later local process can't harvest
+        #      the token here (it could already read the 0600 token file; this
+        #      adds no new exposure, but closes the convenience hole).
+        if not self.headers.get("X-Botzy-Pair"): return self._deny(403)
+        with Handler._pair_lock:
+            if Handler.paired: return self._deny(403)   # window already closed
+            Handler.paired=True                          # close BEFORE delivering (fail-closed)
+        body=json.dumps({"token":self.token}).encode(); self.send_response(200)
         self.send_header("Content-Type","application/json")
         self.send_header("Access-Control-Allow-Origin", self.cfg["allowed_extension_origin"])
         self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -70,6 +94,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type","application/json")
             self.send_header("Content-Length",str(len(body))); self.end_headers()
             self.wfile.write(body); return
+        if self.path == self.cfg.get("pair_path","/v1/pair"): return self._pair()
         if self.path != self.cfg["state_path"]: return self._deny(404)
         auth=self.headers.get("Authorization",""); presented=auth[7:] if auth.startswith("Bearer ") else ""
         if not (presented and hmac.compare_digest(presented, self.token)): return self._deny(401)

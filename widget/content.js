@@ -455,11 +455,13 @@
     settingRow(st, "Spike blink", checkbox(settings.blinkOn, (v) => { settings.blinkOn = v; saveSettings(); }));
     settingRow(st, "Refresh (s)", numbox(settings.refreshSec, 1, (v) => { settings.refreshSec = v; saveSettings(); startInterval(); }));
     settingRow(st, "Spike threshold (tok)", numbox(settings.spikeThresholdTokens, 100, (v) => { settings.spikeThresholdTokens = v; saveSettings(); }));
-    // Gate 1: paste the bridge token the reader printed on first run. Stored on
-    // its OWN storage key (never inside botzy_settings). Empty => "not paired".
+    // Gate 1/2 bridge token. Normally AUTO-PAIRED: background.js fetches it once
+    // from the reader's loopback /v1/pair and stores it here — no paste needed.
+    // This box is the FALLBACK: if auto-pair fails, paste the token the installer
+    // printed. Stored on its OWN key (never inside botzy_settings).
     const tokInput = document.createElement("input");
     tokInput.type = "password";
-    tokInput.placeholder = "paste bridge token";
+    tokInput.placeholder = "auto-paired — paste only if needed";
     storageGet("botzy_bridge_token").then((t) => {
       if (t) { tokInput.value = t; state.bridgePaired = true; renderBridge(); }
     });
@@ -598,7 +600,7 @@
   function pollBridge() {
     try {
       chrome.runtime.sendMessage(
-        { type: "bridge:getState", port: CFG.bridge.port, path: CFG.bridge.path },
+        { type: "bridge:getState", port: CFG.bridge.port, path: CFG.bridge.path, pairPath: CFG.bridge.pairPath },
         (resp) => {
           if (chrome.runtime.lastError) { state.bridgeNote = "bridge unavailable"; renderBridge(); return; }
           if (!resp || !resp.ok) {

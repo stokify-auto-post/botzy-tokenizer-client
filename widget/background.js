@@ -47,15 +47,42 @@ function sanitiseState(j) {
   return out;
 }
 
+// AUTO-PAIR: when no bridge token is stored yet, fetch it ONCE from the reader's
+// loopback /v1/pair and persist it — so the user never hand-copies/pastes it. The
+// custom X-Botzy-Pair header is what only THIS service worker can send to loopback
+// (host_permission = no CORS preflight); a web page's cross-origin attempt would
+// be preflighted and blocked. The reader closes the window after the first success.
+async function bridgeAutoPair(port, pairPath) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}${pairPath}`, {
+      method: "GET",
+      headers: { "X-Botzy-Pair": "1" },
+      credentials: "omit",
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = await res.json();
+    const token = (j && typeof j.token === "string" && j.token) ? j.token : null;
+    if (!token) return null;
+    await chrome.storage.local.set({ botzy_bridge_token: token });
+    return token;
+  } catch (e) { clearTimeout(timer); return null; }
+}
+
 async function bridgeGetState(msg) {
-  let store;
-  try { store = await chrome.storage.local.get("botzy_bridge_token"); }
-  catch (e) { return { ok: false, reason: "storage" }; }
-  const token = store && store.botzy_bridge_token;
-  if (!token) return { ok: false, reason: "unpaired" };
   // HOST PINNED to loopback in code — port/path only come from config.
   const port = parseInt(msg && msg.port, 10) || 8765;
   const path = (msg && typeof msg.path === "string" && msg.path[0] === "/") ? msg.path : "/v1/state";
+  const pairPath = (msg && typeof msg.pairPath === "string" && msg.pairPath[0] === "/") ? msg.pairPath : "/v1/pair";
+  let store;
+  try { store = await chrome.storage.local.get("botzy_bridge_token"); }
+  catch (e) { return { ok: false, reason: "storage" }; }
+  let token = store && store.botzy_bridge_token;
+  if (!token) token = await bridgeAutoPair(port, pairPath);   // deliver the token automatically
+  if (!token) return { ok: false, reason: "unpaired" };       // auto-pair failed -> manual paste fallback
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {

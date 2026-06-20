@@ -117,6 +117,8 @@ const BOTZY_CONFIG = {
     host: "127.0.0.1",   // informational; background.js pins loopback in code
     port: 8765,          // must match reader/bridge_local_config.yaml
     path: "/v1/state",   // GET-only state endpoint
+    pairPath: "/v1/pair",// GET-only AUTO-PAIR: fetched ONCE when no token is stored,
+                         // returns {token}; reader closes the window after first use
     pollSec: 300         // reuse the usage-endpoint cadence (api.pollSec); +on-load
   },
 
