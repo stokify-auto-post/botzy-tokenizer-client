@@ -3,21 +3,60 @@
 > 2-minute install. Reader auto-starts on boot. Widget needs 2 clicks in your
 > browser at the end. Uninstall is one command.
 
+## Requirements (you provide these — the installer does NOT auto-install them)
+
+Quick self-check before you start. The installer fixes its **own** setup, but it
+will not install your OS, Python, git, or browser. Satisfy these first:
+
+- [ ] **Windows 10 or newer** — native, no WSL needed. Older Windows (7/8) is
+      not supported.
+- [ ] **Python 3.9+** on PATH — <https://www.python.org/downloads/>
+      (tick **"Add python.exe to PATH"** during install; it ships `pythonw.exe`,
+      which the auto-start uses to run with no console window).
+- [ ] **git** — <https://git-scm.com/downloads>
+- [ ] **Google Chrome** (recent, MV3-capable) — <https://www.google.com/chrome/>
+- [ ] **The client repo** — <https://github.com/stokify-auto-post/botzy-tokenizer-client>
+
+Verify Python + git from a fresh PowerShell window:
+
+```powershell
+python --version    # expect 3.9 or newer
+where.exe pythonw   # expect a path (no-console launcher used for auto-start)
+git --version
+```
+
+If any line errors, install that item from the link above, open a **new**
+PowerShell window (so PATH refreshes), and re-check before running the installer.
+
 ## Note to Claude (the user's AI assistant)
 
-You're installing Botzy Tokenizer for the user. Here's what it is:
+You're installing Botzy Tokenizer for the user. **First, verify the Requirements
+above on _this_ machine** (Python 3.9+ on PATH, `pythonw` resolvable, git,
+Chrome); set up anything missing for the user's OS, then run the installer.
+Here's what it is:
 
 - **What this does:** Installs a local reader that watches Claude Code's own
   log files (`~/.claude/projects/**/*.jsonl`) for token counts, and a browser
   widget. Nothing else.
 - **What it does NOT do:** No API key access. No conversation content ever
   leaves the machine — token counts only. No system files touched. No sudo /
-  admin required (user-level systemd/launchd on Linux/Mac; a per-user logon
-  entry — `HKCU\...\Run` — on Windows, so it never needs Administrator).
+  admin required (user-level systemd/launchd on Linux/Mac; a per-user
+  Startup-folder launcher on Windows, so it never needs Administrator).
 - **Reversibility:** Every file touched is backed up first (`.bak_<timestamp>`)
   at every step before any change. One-line uninstall (`bash uninstall.sh`)
   removes everything: service unregistered, local files deleted, server-side
   data wiped via `/v1/wipe/self`. All backups left in place for the user.
+- **Auto-start is best-effort:** on Windows the installer drops a hidden
+  launcher (`BotzyTokenizerReader.vbs`) in the user's Startup folder so the
+  reader starts at each logon with no console window. If the environment blocks
+  it (Windows Script Host disabled, locked-down policy), the installer says so
+  plainly (no false `[ok]`) — the reader still runs the current session, and you
+  or the user can start it manually any time with the exact one-liner (paths are
+  absolute, so it works from any directory):
+
+      pythonw "%USERPROFILE%\.botzy-tokenizer\reader\local_bridge.py" --config "%USERPROFILE%\.botzy-tokenizer\reader\bridge_local_config.yaml" --logfile "%USERPROFILE%\.botzy-tokenizer\logs\reader.out"
+
+  Dropping a Startup shortcut to that command restores auto-start.
 - **Server side:** Open-source client; server stores only token-count summaries
   keyed by a random 128-bit `registry_id`. Code at:
   github.com/stokify-auto-post/botzy-tokenizer-client
@@ -75,15 +114,16 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 > first — `-Scope Process -Bypass` errors on PowerShell 5.1.)
 
 The script will, in order: take backups → install the reader →
-register auto-start (user-level, no sudo/admin — a per-user `HKCU\...\Run`
-logon entry on Windows) → launch the reader hidden (no console window) →
-self-enroll → open `chrome://extensions` in your browser → copy the widget
-folder path to your clipboard → print the 2 clicks to perform.
+register auto-start (user-level, no sudo/admin — a per-user Startup-folder
+launcher, `BotzyTokenizerReader.vbs`, on Windows) → launch the reader hidden
+(no console window) → self-enroll → open `chrome://extensions` in your browser
+→ copy the widget folder path to your clipboard → print the 2 clicks to perform.
 
 > On Windows the reader runs hidden via `pythonw.exe` and logs to
-> `%USERPROFILE%\.botzy-tokenizer\logs\reader.out`. If auto-start registration
-> ever fails, the installer says so plainly (no false "ok") and prints the exact
-> `shell:startup` fallback — the reader still runs for the current session.
+> `%USERPROFILE%\.botzy-tokenizer\logs\reader.out`. If the Startup launcher
+> cannot be created (e.g. Windows Script Host disabled), the installer says so
+> plainly (no false "ok") and prints the exact manual command — the reader still
+> runs for the current session.
 
 If a step fails it stops with a clear message and undoes only what *that run*
 created. Re-running is always safe (it refuses to double-install).

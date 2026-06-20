@@ -26,10 +26,19 @@ $WipeUrl     = "$ServerBase$WipePath"
 Say "Botzy Tokenizer uninstaller"
 Say "  install root: $InstallRoot"
 
-# 1. remove auto-start (HKCU\...\Run) + any legacy scheduled task
-$RunKey  = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+# 1. remove auto-start: Startup launcher (current) + HKCU Run (round-1) + legacy task
 $RunName = "BotzyTokenizerReader"
-$runVal  = $null
+
+# current mechanism: Startup-folder .vbs launcher
+$VbsPath = Join-Path ([Environment]::GetFolderPath('Startup')) "$RunName.vbs"
+if (Test-Path $VbsPath) {
+  Remove-Item -Force $VbsPath -ErrorAction SilentlyContinue
+  Say "  [ok] Startup launcher removed"
+} else { Say "  (no Startup launcher - already removed)" }
+
+# round-1 mechanism: HKCU\...\Run entry (harmless no-op if absent)
+$RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$runVal = $null
 try { $runVal = (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue).$RunName } catch {}
 if ($runVal) {
   Remove-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue
