@@ -30,13 +30,17 @@ chrome.runtime.onInstalled.addListener(() => {
 // numbers/state ONLY — strip the bridge response down to the expected shape so
 // nothing unexpected (content, prompts, file bodies) can ride back to the page.
 function sanitiseState(j) {
-  const out = { usage: { five_hour_pct: null, seven_day_pct: null, resets_at: null }, dtach: [] };
+  const out = { usage: { five_hour_pct: null, seven_day_pct: null, resets_at: null },
+                logs_found: null, has_data: null, dtach: [] };
   if (j && typeof j.usage === "object" && j.usage) {
     const u = j.usage;
     out.usage.five_hour_pct = (typeof u.five_hour_pct === "number") ? u.five_hour_pct : null;
     out.usage.seven_day_pct = (typeof u.seven_day_pct === "number") ? u.seven_day_pct : null;
     out.usage.resets_at = (typeof u.resets_at === "string") ? u.resets_at : null;
   }
+  // empty-state signal (numbers/bool only): "bridge alive, no logs yet" vs offline
+  if (j && typeof j.logs_found === "number") out.logs_found = j.logs_found;
+  if (j && typeof j.has_data === "boolean") out.has_data = j.has_data;
   if (Array.isArray(j && j.dtach)) {
     out.dtach = j.dtach.slice(0, 50).map((d) => ({
       name: (d && typeof d.name === "string") ? d.name.slice(0, 80) : "",

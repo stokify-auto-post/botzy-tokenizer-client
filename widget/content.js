@@ -66,6 +66,7 @@
     // ---- Gate 1/2 localhost bridge (numbers/state only, via service worker) ---
     bridgePaired: false, // a bridge token has been pasted into settings
     bridgeNote: null,    // quiet status ("bridge not paired" / "bridge offline")
+    bridgeHasData: null, // null=unknown, true=logs present, false=connected but no logs yet
     bridgeDtach: []      // [{name, alive, attached}] — HONEST dtach names, no mask
   };
 
@@ -407,6 +408,13 @@
     row(ov, "Model", "model");
     row(ov, "Total est. tokens", "total");
     row(ov, "Last msg est.", "last");
+    // empty-state hint: explains the "—" so it never reads as a broken 0
+    const emptyHint = document.createElement("div");
+    emptyHint.id = "botzy-empty-hint";
+    emptyHint.className = "botzy-hint";
+    emptyHint.style.display = "none";
+    ov.appendChild(emptyHint);
+    ui.emptyHint = emptyHint;
     row(ov, "Spikes", "spikes");
     // Gate 1/2 bridge: status line + HONEST dtach session list (real names)
     row(ov, "Bridge", "bridge");
@@ -507,9 +515,21 @@
     ui.asOf.classList.toggle("botzy-warn", !state.usageAsOf || !!state.usageNote);
     ui.model.textContent = state.model || "model unknown";
     ui.model.classList.toggle("botzy-warn", !state.model);
-    ui.total.textContent = String(state.totalEstTokens);
+    // empty-state: show "—" (not a scary 0) until the page has tracked a message
+    const noEst = state.totalEstTokens === 0;
+    ui.total.textContent = noEst ? "—" : String(state.totalEstTokens);
     ui.last.textContent = state.lastEstTokens === null ? "—" : String(state.lastEstTokens);
     ui.spikes.textContent = String(state.spikeCount);
+    if (ui.emptyHint) {
+      if (noEst) {
+        ui.emptyHint.textContent = (state.bridgeHasData === false)
+          ? "bridge connected · no Claude Code logs yet — counts appear once you use Claude Code"
+          : "no messages estimated on this page yet — counts appear as you chat";
+        ui.emptyHint.style.display = "";
+      } else {
+        ui.emptyHint.style.display = "none";
+      }
+    }
     renderBridge();
 
     // rebuild log table (last displayLogRows rows, newest first)
@@ -550,10 +570,15 @@
     } else if (state.bridgeNote) {
       ui.bridge.textContent = state.bridgeNote;
       ui.bridge.classList.add("botzy-warn");
+    } else if (state.bridgeDtach.length) {
+      ui.bridge.textContent = state.bridgeDtach.length + " session(s)";
+      ui.bridge.classList.remove("botzy-warn");
+    } else if (state.bridgeHasData === false) {
+      // reachable + authed, but no ~/.claude/projects logs yet — healthy, not an error
+      ui.bridge.textContent = "connected · no Claude Code logs yet";
+      ui.bridge.classList.remove("botzy-warn");
     } else {
-      ui.bridge.textContent = state.bridgeDtach.length
-        ? state.bridgeDtach.length + " session(s)"
-        : "connected";
+      ui.bridge.textContent = "connected";
       ui.bridge.classList.remove("botzy-warn");
     }
     const box = ui.dtachBox;
@@ -602,22 +627,24 @@
       chrome.runtime.sendMessage(
         { type: "bridge:getState", port: CFG.bridge.port, path: CFG.bridge.path, pairPath: CFG.bridge.pairPath },
         (resp) => {
-          if (chrome.runtime.lastError) { state.bridgeNote = "bridge unavailable"; renderBridge(); return; }
+          if (chrome.runtime.lastError) { state.bridgeNote = "bridge unavailable"; state.bridgeHasData = null; render(); return; }
           if (!resp || !resp.ok) {
             if (resp && resp.reason === "unpaired") { state.bridgePaired = false; state.bridgeNote = "bridge not paired"; }
             else { state.bridgePaired = true; state.bridgeNote = "bridge offline"; }
-            state.bridgeDtach = [];
-            renderBridge(); return;
+            state.bridgeDtach = []; state.bridgeHasData = null;
+            render(); return;
           }
           state.bridgePaired = true;
           state.bridgeNote = null;
           const st = resp.state || {};
+          // empty-state: reachable but no Claude Code logs yet vs has data
+          state.bridgeHasData = (typeof st.has_data === "boolean") ? st.has_data : null;
           state.bridgeDtach = Array.isArray(st.dtach) ? st.dtach.map((d) => ({
             name: String((d && d.name) || ""),
             alive: !!(d && d.alive),
             attached: !!(d && d.attached)
           })) : [];
-          renderBridge();
+          render();
         });
     } catch (e) { state.bridgeNote = "bridge unavailable"; renderBridge(); }
   }

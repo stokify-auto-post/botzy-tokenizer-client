@@ -47,9 +47,25 @@ def _socket_has_peer(path):
         s.settimeout(0.2); s.connect(path); return True
     except OSError: return False
     finally: s.close()
+def count_project_logs():
+    # COUNT (never content) of Claude Code *.jsonl logs under ~/.claude/projects.
+    # Pure number -> lets the widget tell "bridge alive, no logs yet" apart from
+    # "bridge offline". Never opens/reads a log line (MOAT: this file relays
+    # numeric state only). Missing dir / unreadable -> 0.
+    base = os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    n = 0
+    try:
+        for _root, _dirs, files in os.walk(base):
+            for f in files:
+                if f.endswith(".jsonl"): n += 1
+    except OSError:
+        pass
+    return n
 def build_state(cfg):
+    logs = count_project_logs()
     return {"schema":"botzy.bridge.state.v1",
             "usage":{"five_hour_pct":None,"seven_day_pct":None,"resets_at":None},
+            "logs_found":logs, "has_data":logs > 0,
             "dtach":collect_dtach_sessions(cfg)}
 class Handler(BaseHTTPRequestHandler):
     cfg=None; token=None
