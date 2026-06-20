@@ -76,17 +76,9 @@ async function bridgeAutoPair(port, pairPath) {
   } catch (e) { clearTimeout(timer); return null; }
 }
 
-async function bridgeGetState(msg) {
-  // HOST PINNED to loopback in code — port/path only come from config.
-  const port = parseInt(msg && msg.port, 10) || 8765;
-  const path = (msg && typeof msg.path === "string" && msg.path[0] === "/") ? msg.path : "/v1/state";
-  const pairPath = (msg && typeof msg.pairPath === "string" && msg.pairPath[0] === "/") ? msg.pairPath : "/v1/pair";
-  let store;
-  try { store = await chrome.storage.local.get("botzy_bridge_token"); }
-  catch (e) { return { ok: false, reason: "storage" }; }
-  let token = store && store.botzy_bridge_token;
-  if (!token) token = await bridgeAutoPair(port, pairPath);   // deliver the token automatically
-  if (!token) return { ok: false, reason: "unpaired" };       // auto-pair failed -> manual paste fallback
+// One authed GET /v1/state. Returns {ok,state} on 200, {ok:false,reason,status}
+// otherwise (status carried so the caller can detect a 401 = stale token).
+async function bridgeFetchState(port, path, token) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
@@ -97,13 +89,42 @@ async function bridgeGetState(msg) {
       signal: ctrl.signal
     });
     clearTimeout(timer);
-    if (!res.ok) return { ok: false, reason: "status_" + res.status };
-    const json = await res.json();
-    return { ok: true, state: sanitiseState(json) };
+    if (res.ok) return { ok: true, state: sanitiseState(await res.json()) };
+    return { ok: false, reason: "status_" + res.status, status: res.status };
   } catch (e) {
     clearTimeout(timer);
     return { ok: false, reason: "unreachable" };
   }
+}
+
+async function bridgeGetState(msg) {
+  // HOST PINNED to loopback in code — port/path only come from config.
+  const port = parseInt(msg && msg.port, 10) || 8765;
+  const path = (msg && typeof msg.path === "string" && msg.path[0] === "/") ? msg.path : "/v1/state";
+  const pairPath = (msg && typeof msg.pairPath === "string" && msg.pairPath[0] === "/") ? msg.pairPath : "/v1/pair";
+  let store;
+  try { store = await chrome.storage.local.get("botzy_bridge_token"); }
+  catch (e) { return { ok: false, reason: "storage" }; }
+  let token = store && store.botzy_bridge_token;
+  const hadToken = !!token;                                    // distinguishes stale vs never-paired
+  if (!token) token = await bridgeAutoPair(port, pairPath);   // fresh-install: deliver the token
+  if (!token) return { ok: false, reason: "unpaired" };       // auto-pair failed -> manual paste fallback
+
+  let result = await bridgeFetchState(port, path, token);
+
+  // STALE-TOKEN RECOVERY: a 401 while we HELD a stored token means the reader
+  // reminted its token (reinstall/restart) and ours is stale — a reload doesn't
+  // clear chrome.storage, and only the widget can fix it. Clear the stale token,
+  // re-pair ONCE (the reader reopened its one-time window on restart), retry. A
+  // single attempt per stale 401: if re-pair or the retry fails we surface the
+  // honest result (offline) — no /v1/pair spin, manual-paste box stays as backup.
+  if (result.status === 401 && hadToken) {
+    try { await chrome.storage.local.remove("botzy_bridge_token"); } catch (e) {}
+    const fresh = await bridgeAutoPair(port, pairPath);
+    result = fresh ? await bridgeFetchState(port, path, fresh)
+                   : { ok: false, reason: "unreachable" };    // window closed / reader gone
+  }
+  return result;
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

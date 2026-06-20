@@ -140,6 +140,41 @@ end-to-end enroll → `/health` → wipe against the enrollment server
 
 ### Changelog
 
+- **2026-06-20 — Native-Windows auto-start, auto-pair & empty-state fixes**
+  (all found via a real native-Windows reboot/reinstall test: Python 3.14, no
+  WSL, no `~/.claude` logs). Each fix is widget- or installer-side, no admin:
+  - **Admin-less auto-start.** `Register-ScheduledTask` needs admin on
+    locked-down boxes (`0x80070005`) and hid its own failure behind a false
+    `[ok]`. Replaced with a per-user **Startup-folder launcher**
+    (`BotzyTokenizerReader.vbs`, `WScript.Shell.Run(cmd,0,False)` = hidden, no
+    console). An earlier `HKCU\…\Run` attempt was dropped: its multi-quoted
+    command line fired unreliably at logon (worked manually, not on reboot).
+    Every `[ok]` is now gated on a verified result; failures print `[x]` + the
+    real reason + a manual fallback.
+  - **Requirements manual.** `INSTALL.md` gained a top "Requirements" section
+    (Windows 10+, Python 3.9+, git, Chrome) with direct links + a self-check,
+    and a sharpened "Note to Claude" (auto-start is best-effort; exact `pythonw`
+    manual-launch fallback). The OS/Python/git/Chrome environment is the user's
+    to provide; the installer fixes only its own setup.
+  - **Token auto-pair.** The widget's `/v1/state` was 401-ing because the
+    per-install bridge token never reached it (silent auto-start never shows the
+    printed token). Added a loopback-only `GET /v1/pair` (custom-header gated so
+    a web page can't reach it cross-origin; one-time window that closes after the
+    first pair) and widget auto-fetch — **no manual paste**. Token stays unique,
+    only delivery is automated; the paste box remains as a fallback.
+  - **Empty-state honesty.** With the bridge healthy but no Claude Code logs yet,
+    the panel showed a bare `0`/`—` that read as "broken". `/v1/state` now
+    reports `logs_found`/`has_data` (a count, never content); the widget shows
+    "connected · no Claude Code logs yet" and `—` + a hint instead of a scary 0.
+  - **Stale-token self-recovery.** On reinstall the reader remints its token
+    while the widget still holds the old one (a reload doesn't clear
+    `chrome.storage`, and only the widget can — the installer can't touch the
+    browser sandbox). The widget now detects a `401` while holding a token,
+    clears it, re-pairs once against the restarted reader, and retries — so a
+    reinstall recovers to "connected" on its own.
+  - Verified on Linux (reader curl matrix + JS `node --check`) and confirmed on
+    a real native-Windows reboot/reinstall run.
+
 - **2026-06-15 — Windows installer fixes** (found via a real native-Windows
   newcomer test: clean machine, Python 3.14 + git 2.54, no WSL):
   - `setup.ps1` pre-flight Python check **rewritten PS-native** — the old inline
