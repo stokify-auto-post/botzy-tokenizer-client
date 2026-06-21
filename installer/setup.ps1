@@ -70,6 +70,25 @@ try {
   if ($maj -lt 3 -or ($maj -eq 3 -and $min -lt 9)) { Die "python >= 3.9 required (have $pyv)." }
   Say "  os: windows ; python $pyv"
 
+  # E1/E4 (soft): the opt-in daily UPLOAD (Fernet) needs `cryptography`; config/URL
+  # resolution needs `PyYAML`. Non-fatal — bridge + basic monitoring work without
+  # them — but we actively try to provide them (best-effort pip) so the upload/
+  # delivery layer isn't silently disabled on a clean machine.
+  $UploadDeps = $true
+  & python -c "import yaml, cryptography" 2>$null; if ($LASTEXITCODE -ne 0) { $UploadDeps = $false }
+  if (-not $UploadDeps -and -not $DryRun) {
+    Say "  installing upload deps (cryptography, PyYAML) - best effort, user-level..."
+    & python -m pip install --user --quiet cryptography pyyaml 2>$null | Out-Null
+    & python -c "import yaml, cryptography" 2>$null; if ($LASTEXITCODE -eq 0) { $UploadDeps = $true }
+  }
+  if ($UploadDeps) {
+    Say "  deps: cryptography + PyYAML present (daily upload enabled)"
+  } else {
+    Say "  note: cryptography/PyYAML missing and auto-install failed - daily usage"
+    Say "        upload/delivery stays OFF until: pip install --user cryptography pyyaml."
+    Say "        Bridge + widget + live monitoring are unaffected."
+  }
+
   # -------- STEP 2 idempotency
   Step 2 "idempotency guard"
   if (Test-Path $CredsPath) {

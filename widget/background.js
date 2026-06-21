@@ -7,10 +7,11 @@
 //  2) Gate 1 localhost bridge PROXY: on "bridge:getState" it performs the ONLY
 //     loopback fetch in the whole extension. The host is PINNED to 127.0.0.1
 //     in code (never taken from config/page) so this worker can never be
-//     tricked into talking to a remote host. Because the fetch originates from
-//     the service worker, its Origin is chrome-extension://<id> — which is what
-//     the reader's bridge allowlists; a content-script fetch (Origin
-//     claude.ai) is deliberately rejected 403 by the bridge.
+//     tricked into talking to a remote host. The reader's bridge security is
+//     loopback-bind + a constant-time TOKEN (the old Origin/403 gate was REMOVED:
+//     an MV3 service-worker loopback fetch sends NO Origin, so an origin check
+//     would only have broken the legitimate widget). The fetch still originates
+//     from the service worker (host_permission) so no CORS preflight is needed.
 //
 // MOAT: only numbers/state cross this worker. The response is sanitised to the
 // expected numeric shape before it is handed back; no content is ever stored,
@@ -31,7 +32,7 @@ chrome.runtime.onInstalled.addListener(() => {
 // nothing unexpected (content, prompts, file bodies) can ride back to the page.
 function sanitiseState(j) {
   const out = { usage: { five_hour_pct: null, seven_day_pct: null, resets_at: null },
-                logs_found: null, has_data: null, dtach: [] };
+                logs_found: null, has_data: null, advice: [], server_advice: [], dtach: [] };
   if (j && typeof j.usage === "object" && j.usage) {
     const u = j.usage;
     out.usage.five_hour_pct = (typeof u.five_hour_pct === "number") ? u.five_hour_pct : null;
@@ -41,6 +42,26 @@ function sanitiseState(j) {
   // empty-state signal (numbers/bool only): "bridge alive, no logs yet" vs offline
   if (j && typeof j.logs_found === "number") out.logs_found = j.logs_found;
   if (j && typeof j.has_data === "boolean") out.has_data = j.has_data;
+  // E2: reader's LOCAL advice — outcome MESSAGES only. Strip to the expected
+  // {kind, message, model?, inr?} text/number shape so nothing unexpected
+  // (content, prompts, file bodies) can ride back to the page. Bounded length.
+  if (Array.isArray(j && j.advice)) {
+    out.advice = j.advice.slice(0, 50).map((a) => ({
+      kind: (a && typeof a.kind === "string") ? a.kind.slice(0, 40) : "tip",
+      message: (a && typeof a.message === "string") ? a.message.slice(0, 300) : "",
+      model: (a && typeof a.model === "string") ? a.model.slice(0, 60) : null,
+      inr: (a && typeof a.inr === "number") ? a.inr : null
+    })).filter((a) => a.message);
+  }
+  // E4: SERVER/ENGINE advice — outcome MESSAGES only, same strip as local advice so
+  // nothing unexpected can ride back to the page. A separate layer the panel labels.
+  if (Array.isArray(j && j.server_advice)) {
+    out.server_advice = j.server_advice.slice(0, 50).map((a) => ({
+      kind: (a && typeof a.kind === "string") ? a.kind.slice(0, 40) : "engine",
+      message: (a && typeof a.message === "string") ? a.message.slice(0, 300) : "",
+      model: (a && typeof a.model === "string") ? a.model.slice(0, 60) : null
+    })).filter((a) => a.message);
+  }
   if (Array.isArray(j && j.dtach)) {
     out.dtach = j.dtach.slice(0, 50).map((d) => ({
       name: (d && typeof d.name === "string") ? d.name.slice(0, 80) : "",
@@ -121,8 +142,15 @@ async function bridgeGetState(msg) {
   if (result.status === 401 && hadToken) {
     try { await chrome.storage.local.remove("botzy_bridge_token"); } catch (e) {}
     const fresh = await bridgeAutoPair(port, pairPath);
+    // If re-pair fails, keep the 401 signal (the reader is ALIVE but rejecting our
+    // token) rather than masking it as "unreachable" — M5: 401 != offline.
     result = fresh ? await bridgeFetchState(port, path, fresh)
-                   : { ok: false, reason: "unreachable" };    // window closed / reader gone
+                   : { ok: false, reason: "status_401", status: 401 };
+  }
+  // M5: a final 401 means the bridge is up and authenticating but our token is
+  // rejected (stale/wrong) — surface "token rejected, re-pair", NOT "offline".
+  if (!result.ok && result.status === 401) {
+    return { ok: false, reason: "token_rejected", status: 401 };
   }
   return result;
 }

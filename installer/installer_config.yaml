@@ -9,6 +9,13 @@ enroll_path:    "/tokenizer/v1/enroll/self"
 wipe_path:      "/tokenizer/v1/wipe/self"
 feedback_path:  "/tokenizer/v1/feedback"     # may not be live server-side yet —
                                              # client queues notes locally on 404
+usage_path:     "/tokenizer/v1/usage"        # E1: daily encrypted token-summary upload
+                                             # (POST). Reached by the reader's background
+                                             # loop ONLY when enrolled + bridge-connected.
+advice_path:    "/tokenizer/v1/advice/{registry_id}.json"   # E4: read-only GET of THIS
+                                             # install's OWN registry-tagged static advice
+                                             # file (server writes, reader reads — one-way,
+                                             # no endpoint logic). {registry_id} = own id.
 
 # bridge_port: localhost reader<->widget bridge.
 # NOTE: 8765 is PINNED — it MUST match the widget, which hardcodes it in three
@@ -21,3 +28,8 @@ reader_log_dir: "${HOME}/.botzy-tokenizer/logs"     # 0700
 creds_path:     "${HOME}/.botzy-tokenizer/creds.json"   # 0600
 state_path:     "${HOME}/.botzy-tokenizer/state.json"   # 0600
 poll_seconds:   300
+
+# ── E1 daily usage upload (opt-in; gated on creds + bridge-connected) ──────────
+upload_enabled:       true                              # master off-switch for the upload feature
+upload_check_seconds: 1800                              # how often the reader re-checks the gate (≥60)
+upload_marker:        "${HOME}/.botzy-tokenizer/.last_upload"  # 0600; holds last uploaded UTC date

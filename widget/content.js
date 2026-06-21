@@ -67,7 +67,12 @@
     bridgePaired: false, // a bridge token has been pasted into settings
     bridgeNote: null,    // quiet status ("bridge not paired" / "bridge offline")
     bridgeHasData: null, // null=unknown, true=logs present, false=connected but no logs yet
-    bridgeDtach: []      // [{name, alive, attached}] — HONEST dtach names, no mask
+    bridgeDtach: [],     // [{name, alive, attached}] — HONEST dtach names, no mask
+    bridgeAdvice: [],    // E2: reader's LOCAL advice — [{kind, message, model?, inr?}],
+                         // outcome MESSAGES only, shown in TIPS when connected + has logs
+    bridgeServerAdvice: [] // E4: SERVER/ENGINE advice — [{kind, message, model?}],
+                         // pulled by the reader from its own registry-tagged file,
+                         // shown as a SEPARATE labelled layer above the local advice
   };
 
   let orgId = null;     // resolved dynamically (per user), cached in storage
@@ -438,8 +443,23 @@
     ui.logTable = logTable;
     ui.logHead = thead;
 
-    // TIPS (static, from config) + display-only rates
+    // TIPS — LIVE advice from the reader's own logs (E2) sits ABOVE the static
+    // tips. Heading is honest about provenance ("from your local logs"); the
+    // body is filled by renderAdvice() and gated on the bridge being connected.
     const tipsBody = tabBodies["TIPS"].body;
+    const adviceHead = document.createElement("div");
+    adviceHead.className = "botzy-advice-head";
+    adviceHead.textContent = "Your advice";
+    tipsBody.appendChild(adviceHead);
+    const adviceBox = document.createElement("div");
+    adviceBox.id = "botzy-advice";
+    adviceBox.className = "botzy-advice";
+    tipsBody.appendChild(adviceBox);
+    ui.adviceBox = adviceBox;
+    const tipsHead = document.createElement("div");
+    tipsHead.className = "botzy-advice-head";
+    tipsHead.textContent = "General tips";
+    tipsBody.appendChild(tipsHead);
     for (const t of CFG.tips) {
       const p = document.createElement("p");
       p.textContent = "• " + t;
@@ -531,6 +551,7 @@
       }
     }
     renderBridge();
+    renderAdvice();
 
     // rebuild log table (last displayLogRows rows, newest first)
     while (ui.logTable.rows.length > 1) ui.logTable.deleteRow(1);
@@ -595,6 +616,59 @@
     }
   }
 
+  // Advice render — TWO clearly-labelled layers, bridge-gated, OUTCOME-only lines:
+  //   • SERVER / ENGINE layer (E4): the engine's analysis pulled from your own
+  //     registry-tagged file (enrollment-gated; may exist before any local log).
+  //   • LOCAL layer (E2): the reader's advice from your own Claude Code logs (B3
+  //     gate: only when paired + connected + logs present).
+  // No bridge => basic-monitoring hint. DOM built with textContent only (advice
+  // text is an already-distilled outcome message — never content, never a formula).
+  function renderAdvice() {
+    const box = ui.adviceBox;
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    function hint(text) {
+      const p = document.createElement("div");
+      p.className = "botzy-hint";
+      p.textContent = text;
+      box.appendChild(p);
+    }
+    function sublabel(text) {
+      const d = document.createElement("div");
+      d.className = "botzy-advice-sublabel";
+      d.textContent = text;
+      box.appendChild(d);
+    }
+    function rows(list) {
+      for (const a of list) {
+        const p = document.createElement("div");
+        p.className = "botzy-advice-row";
+        p.textContent = "• " + a.message;
+        box.appendChild(p);
+      }
+    }
+    if (!state.bridgePaired || state.bridgeNote) {
+      // not connected -> basic monitoring only; don't pretend we have advice
+      hint("connect the local reader to see advice from your own logs");
+      return;
+    }
+    // SERVER / ENGINE layer first (the unlock the bridge buys), if the engine has
+    // written advice for this install. Silent when there is none (no fake content).
+    if (state.bridgeServerAdvice.length) {
+      sublabel("From the engine (server analysis):");
+      rows(state.bridgeServerAdvice);
+    }
+    // LOCAL layer (from this machine's logs).
+    sublabel("From your local logs:");
+    if (state.bridgeHasData === false) {
+      hint("no advice yet — appears as you use Claude Code");
+    } else if (!state.bridgeAdvice.length) {
+      hint("no advice for today — nothing stands out in your local logs");
+    } else {
+      rows(state.bridgeAdvice);
+    }
+  }
+
   function refresh() {
     scanModel();
     trackMessages();
@@ -627,11 +701,14 @@
       chrome.runtime.sendMessage(
         { type: "bridge:getState", port: CFG.bridge.port, path: CFG.bridge.path, pairPath: CFG.bridge.pairPath },
         (resp) => {
-          if (chrome.runtime.lastError) { state.bridgeNote = "bridge unavailable"; state.bridgeHasData = null; render(); return; }
+          if (chrome.runtime.lastError) { state.bridgeNote = "bridge unavailable"; state.bridgeHasData = null; state.bridgeAdvice = []; state.bridgeServerAdvice = []; render(); return; }
           if (!resp || !resp.ok) {
             if (resp && resp.reason === "unpaired") { state.bridgePaired = false; state.bridgeNote = "bridge not paired"; }
+            // M5: a live-but-rejecting bridge (401) is NOT "offline" — the reader is
+            // up; our token is stale/wrong. Tell the user to re-pair, not to restart.
+            else if (resp && resp.reason === "token_rejected") { state.bridgePaired = true; state.bridgeNote = "bridge paired but token rejected — re-pair (reload the page) or paste a fresh token"; }
             else { state.bridgePaired = true; state.bridgeNote = "bridge offline"; }
-            state.bridgeDtach = []; state.bridgeHasData = null;
+            state.bridgeDtach = []; state.bridgeHasData = null; state.bridgeAdvice = []; state.bridgeServerAdvice = [];
             render(); return;
           }
           state.bridgePaired = true;
@@ -644,9 +721,22 @@
             alive: !!(d && d.alive),
             attached: !!(d && d.attached)
           })) : [];
+          // E2: LOCAL outcome-only advice messages (defensive re-sanitise on the page side)
+          state.bridgeAdvice = Array.isArray(st.advice) ? st.advice.map((a) => ({
+            kind: String((a && a.kind) || "tip"),
+            message: String((a && a.message) || ""),
+            model: (a && typeof a.model === "string") ? a.model : null,
+            inr: (a && typeof a.inr === "number") ? a.inr : null
+          })).filter((a) => a.message) : [];
+          // E4: SERVER/ENGINE outcome-only advice (defensive re-sanitise on the page side too)
+          state.bridgeServerAdvice = Array.isArray(st.server_advice) ? st.server_advice.map((a) => ({
+            kind: String((a && a.kind) || "engine"),
+            message: String((a && a.message) || ""),
+            model: (a && typeof a.model === "string") ? a.model : null
+          })).filter((a) => a.message) : [];
           render();
         });
-    } catch (e) { state.bridgeNote = "bridge unavailable"; renderBridge(); }
+    } catch (e) { state.bridgeNote = "bridge unavailable"; state.bridgeAdvice = []; state.bridgeServerAdvice = []; renderBridge(); renderAdvice(); }
   }
   function startBridgePolling() {
     if (bridgeId !== null) clearInterval(bridgeId);

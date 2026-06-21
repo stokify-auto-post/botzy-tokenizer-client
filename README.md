@@ -28,6 +28,15 @@ A senior-architect-grade review of your code's design and flaws — the kind of 
 
 You opt in; the analysis runs server-side; you get back specific, prioritized fixes — with a backup in hand and one-command rollback. Your repo is never touched without your say.
 
+**Free, after you connect the bridge** (no payment — through the Builder gate):
+- 🎯 Where *your* spend actually leaks — per-key diagnosis, not generic tips
+- 🔔 Spike & peak-window alerts — the moment a 2× burn starts, well before the wall
+- 🧠 Right-usage fixes from your own logs — applied as your usage reveals them
+- 💸 Per-model spend insight tuned to *your* workflow — where each model's cost is saveable for you
+- 📈 Research-grade token-saver analysis + pre-built formulas that stop you before the wall, not after
+
+*Without the bridge, the widget alone gives live usage %, a spike ping, and a rough token tally — basic monitoring. The real engine — the analysis, the formulas, the per-key cuts — unlocks the moment you connect.*
+
 ---
 
 ## How it works

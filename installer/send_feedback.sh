@@ -2,8 +2,10 @@
 # Botzy Tokenizer — feedback channel. One string arg = your note.
 #   bash send_feedback.sh "your note here"
 # Token-counts-only channel: the note is the only freeform field sent. No user
-# paths, env, or registry_id beyond what the server already knows. If the
-# endpoint isn't live yet (404), the note is queued locally and replayed later.
+# paths, env, or registry_id beyond what the server already knows. If the endpoint
+# isn't live yet (404) the note is queued locally; B3: every run DRAINS that queue
+# first (re-POSTs each pending note, drops it on 2xx, keeps it on failure), so the
+# "sent on a future run" promise is real, not a write-only log.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +63,31 @@ queue() {
   say "  note queued locally at $PENDING_LOG"
 }
 
+# B3: replay any queued notes BEFORE sending the new one. POST each pending line;
+# drop it on 2xx, keep it on any failure. Atomically rewrite the queue with only
+# the still-unsent lines (never lose a note, never claim a phantom send).
+drain_pending() {
+  [ -f "$PENDING_LOG" ] || return 0
+  local keep code sent=0 kept=0
+  keep="$(mktemp)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    code="$(curl -sS --max-time 15 -X POST "${AUTH[@]}" \
+              -H "Content-Type: application/json" -d "$line" \
+              -o /dev/null -w '%{http_code}' "$FEEDBACK_URL" || echo "000")"
+    case "$code" in
+      200|202) sent=$((sent+1)) ;;
+      *)       printf '%s\n' "$line" >> "$keep"; kept=$((kept+1)) ;;
+    esac
+  done < "$PENDING_LOG"
+  if [ "$kept" -gt 0 ]; then mv "$keep" "$PENDING_LOG"; else rm -f "$keep" "$PENDING_LOG"; fi
+  if [ "$sent" -gt 0 ]; then
+    say "  replayed $sent queued note(s)$([ "$kept" -gt 0 ] && printf '; %s still pending' "$kept")"
+  fi
+}
+
+drain_pending     # B3: flush the backlog first (honest "sent on a future run")
+
 TMP_RESP="$(mktemp)"
 HTTP="$(curl -sS --max-time 15 -X POST "${AUTH[@]}" \
           -H "Content-Type: application/json" -d "$BODY" \
@@ -72,7 +99,7 @@ case "$HTTP" in
     say "thanks, note received.${ACK:+ ack: $ACK}" ;;
   404)
     say "feedback endpoint not live yet (404)."; queue
-    say "it will be sent on a future run once the endpoint is up." ;;
+    say "it will be re-sent automatically next time you run send_feedback (the queue is drained on each run)." ;;
   429)
     say "rate limited (429) — try again later."; queue ;;
   000)

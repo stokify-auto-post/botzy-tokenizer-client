@@ -52,4 +52,15 @@ tr.botzy-spikerow td { color: #ff6b60; font-weight: 700; }
   border: 1px solid #3a3a5c; border-radius: 4px; padding: 2px 6px;
 }
 
+/* E2: local advice block in the TIPS tab — section heading + per-advice rows */
+.botzy-advice-head {
+  font-weight: 700; color: #ffaa28; margin: 4px 0 4px; letter-spacing: 0.3px;
+}
+.botzy-advice { margin-bottom: 8px; }
+/* E4: sub-label distinguishing the engine (server) layer from the local layer */
+.botzy-advice-sublabel {
+  font-weight: 600; color: #9aa0b5; margin: 6px 0 2px; font-size: 0.92em;
+}
+.botzy-advice-row { padding: 3px 0; line-height: 1.35; }
+
 #botzy-proof { display: none; }

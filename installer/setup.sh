@@ -102,6 +102,24 @@ PYV="$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')"
 python3 -c 'import sys;sys.exit(0 if sys.version_info[:2]>=(3,9) else 1)' \
   || die "python3 >= 3.9 required (have $PYV)."
 HAVE_JQ=0; command -v jq >/dev/null && HAVE_JQ=1
+# E1/E4 (soft): the opt-in daily usage UPLOAD (Fernet) needs `cryptography`, and
+# config + URL resolution needs `PyYAML`. Non-fatal — the bridge + basic monitoring
+# work without them — but we now actively try to provide them (best-effort pip),
+# so the upload/delivery layer isn't silently disabled on a clean machine.
+UPLOAD_DEPS_OK=1
+python3 -c 'import yaml, cryptography' 2>/dev/null || UPLOAD_DEPS_OK=0
+if [ "$UPLOAD_DEPS_OK" = 0 ] && [ "$DRYRUN" != "1" ]; then
+  say "  installing upload deps (cryptography, PyYAML) — best effort, user-level…"
+  python3 -m pip install --user --quiet cryptography pyyaml >/dev/null 2>&1 || true
+  python3 -c 'import yaml, cryptography' 2>/dev/null && UPLOAD_DEPS_OK=1
+fi
+if [ "$UPLOAD_DEPS_OK" = 1 ]; then
+  say "  deps: cryptography ✓  PyYAML ✓  (daily upload enabled)"
+else
+  say "  note: 'cryptography'/'PyYAML' missing and auto-install failed — daily usage"
+  say "        upload/delivery stays OFF until: pip install --user cryptography pyyaml."
+  say "        Bridge + widget + live monitoring are unaffected."
+fi
 say "  tools: curl ✓  python3 ✓ ($PYV)  jq $([ $HAVE_JQ = 1 ] && echo ✓ || echo '— (python fallback)')"
 
 # ===================================================== STEP 2 — idempotency
@@ -134,8 +152,13 @@ else
   rm -rf "$READER_DST" "$WIDGET_DST"
   cp -a "$REPO_ROOT/reader" "$READER_DST"
   cp -a "$REPO_ROOT/widget" "$WIDGET_DST"
+  # E1: the reader's daily-upload loop reads installer_config.yaml at runtime
+  # (R13 — usage URL + paths live there, never hardcoded). Copy it next to reader/
+  # so the installed reader (arbitrary cwd) can find it. Single source of truth.
+  cp "$CONFIG_FILE" "$INSTALL_ROOT/installer_config.yaml"
   say "  ✓ reader -> $READER_DST"
   say "  ✓ widget -> $WIDGET_DST"
+  say "  ✓ installer_config.yaml -> $INSTALL_ROOT/installer_config.yaml"
 fi
 WIDGET_PATH="$WIDGET_DST"
 

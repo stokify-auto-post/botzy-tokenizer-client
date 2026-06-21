@@ -58,7 +58,33 @@ if [ -f "$INSTALL_ROOT/reader.pid" ]; then
   say "  ✓ stopped reader pid $(cat "$INSTALL_ROOT/reader.pid")"
 fi
 
+# B1: also stop ANY reader bound to this install that the pid-file doesn't know
+# about — after a reboot the live reader was relaunched (systemd/.vbs) under a NEW
+# pid, so the recorded pid is stale. Match it by its script path and WAIT for it to
+# exit (release the port + any open log handle) BEFORE we delete the dir, so we
+# never orphan a port-bound reader or abort the delete on a held file.
+READER_SCRIPT="$INSTALL_ROOT/reader/local_bridge.py"
+if command -v pkill >/dev/null 2>&1; then
+  pkill -f "$READER_SCRIPT" 2>/dev/null || true
+fi
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "$READER_SCRIPT" >/dev/null 2>&1 || break
+  else
+    break
+  fi
+  sleep 0.5
+done
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "$READER_SCRIPT" >/dev/null 2>&1; then
+  say "  ! a reader process is still running ($READER_SCRIPT) — continuing; close it if cleanup is incomplete."
+else
+  say "  ✓ no reader process bound to this install"
+fi
+
 # -------------------------------------------------- 2. server-side wipe
+# WIPE_OK gates whether it is SAFE to delete creds.json: only a confirmed 200/401
+# (data gone) clears it. No creds at all => nothing to wipe => safe to remove.
+WIPE_OK=1
 if [ -f "$CREDS_PATH" ]; then
   if [ "$HAVE_JQ" = 1 ]; then
     REG_ID="$(jq -r '.registry_id // empty' "$CREDS_PATH")"
@@ -75,7 +101,11 @@ if [ -f "$CREDS_PATH" ]; then
   case "$HTTP" in
     200) say "  ✓ server-side data wiped (200)" ;;
     401) say "  ✓ server-side data already gone (401)" ;;
-    *)   say "  ! wipe returned HTTP $HTTP — continuing local cleanup; re-run later if needed." ;;
+    *)   # B2: the wipe did NOT confirm (network down / 5xx / timeout). Do NOT delete
+         # creds.json — it holds the ONLY token that can authorise the wipe. Keeping
+         # it (below) makes "re-run later" actually possible.
+         WIPE_OK=0
+         say "  ! wipe NOT confirmed (HTTP $HTTP) — your server-side data still exists." ;;
   esac
 else
   say "  (no creds.json — nothing to wipe server-side)"
@@ -92,8 +122,29 @@ if [ -d "$INSTALL_ROOT" ]; then
     for b in "${baks[@]}"; do [ -e "$b" ] && mv "$b" "$BACKUPS_DIR/" 2>/dev/null || true; done
     say "  ✓ backups preserved at: $BACKUPS_DIR"
   fi
-  rm -rf "$INSTALL_ROOT"
-  say "  ✓ removed $INSTALL_ROOT"
+  if [ -f "$CREDS_PATH" ] && [ "$WIPE_OK" != 1 ]; then
+    # B2: KEEP creds.json + a wipe_pending marker so a later online re-run can still
+    # wipe the server-side row (the wipe needs that token). Remove everything else.
+    CREDS_BASE="$(basename "$CREDS_PATH")"
+    date -u +"wipe_pending %Y-%m-%dT%H:%M:%SZ — server-side data NOT wiped; re-run 'bash uninstall.sh' when back online to remove it." \
+      > "$INSTALL_ROOT/wipe_pending" 2>/dev/null || true
+    for entry in "$INSTALL_ROOT"/* "$INSTALL_ROOT"/.[!.]*; do
+      [ -e "$entry" ] || continue
+      base="$(basename "$entry")"
+      case "$base" in "$CREDS_BASE"|wipe_pending) continue ;; esac
+      rm -rf "$entry" 2>/dev/null || say "  ! could not remove $entry (close any reader holding it, then re-run)."
+    done
+    say "  ! KEPT $CREDS_BASE + wipe_pending marker (server wipe unconfirmed)."
+    say "    your server-side data still exists — re-run 'bash uninstall.sh' when ONLINE to wipe it."
+  else
+    # tolerant delete: report what couldn't be removed instead of aborting mid-delete.
+    if rm -rf "$INSTALL_ROOT" 2>/dev/null && [ ! -d "$INSTALL_ROOT" ]; then
+      say "  ✓ removed $INSTALL_ROOT"
+    else
+      say "  ! some files under $INSTALL_ROOT could not be removed (a reader handle may"
+      say "    still be open). Close any running reader and re-run, or delete it manually."
+    fi
+  fi
 else
   say "  (install root already gone)"
 fi
