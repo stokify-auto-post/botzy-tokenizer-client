@@ -49,7 +49,7 @@ SCHEMA_VERSION = 1
 
 # ── MOAT CHECK ──────────────────────────────────────────────────────────────
 ALLOWED_TOP = {"schema_version", "date", "generated_at", "scanned", "per_model",
-               "total_cost_inr", "saved", "missed_by_model", "advice"}
+               "total_cost_inr", "saved", "missed_by_model", "advice", "signal_hint"}
 # exact-match key names that must never appear anywhere in the emitted object
 FORBIDDEN_KEYS = {"prompt", "prompts", "response", "responses", "content", "contents",
                   "messages", "body", "text", "raw", "code", "file", "files", "path",
@@ -177,28 +177,43 @@ def read_projects(date: str):
     return files, lines_with_usage, records
 
 
-# ── advice (OPEN schema: {kind, message, model?, inr?}) ─────────────────────
+# ── advice (OPEN schema: {kind, message, severity, model?, inr?}) ───────────
 def build_advice(rates, per_model, missed_rows, web_search_by_model):
+    th = rates.get("advice_thresholds") or {}
+    missed_inr_min = float(th.get("missed_inr_min", 0.01))
+    opus_share_min = float(th.get("opus_share", 0.8))
+    opus_cost_min = float(th.get("opus_cost_min", 1.0))
+
     advice = []
     for row in missed_rows:
-        if row["missed_inr"] >= 0.01:
+        if row["missed_inr"] >= missed_inr_min:
             advice.append({"kind": "cache_uncached_input", "model": row["model"],
-                           "inr": row["missed_inr"],
+                           "inr": row["missed_inr"], "severity": row["missed_inr"],
                            "message": f"{row['model']}: {row['in_tok']} uncached input tokens — "
                                       f"₹{row['missed_inr']} were cacheable"})
     # model-misuse: opus carrying the bulk of cost — flag the haiku/sonnet delta
     total = sum(r["cost_inr"] for r in per_model) or 0.0
     opus_cost = sum(r["cost_inr"] for r in per_model if r["family"] == "opus")
-    if total > 0 and opus_cost / total > 0.8 and opus_cost > 1.0:
+    if total > 0 and opus_cost / total > opus_share_min and opus_cost > opus_cost_min:
         advice.append({"kind": "model_mix_opus_heavy", "inr": round(opus_cost, 3),
+                       "severity": round(opus_cost / total, 3),
                        "message": f"opus is {opus_cost / total * 100:.0f}% of the day's cost "
                                   f"(₹{opus_cost:.2f}) — route bulk/simple calls to haiku or sonnet"})
     for model, ws in web_search_by_model.items():
         if ws > 0 and family_of(model) == "opus":
-            advice.append({"kind": "web_search_on_opus", "model": model,
+            advice.append({"kind": "web_search_on_opus", "model": model, "severity": ws,
                            "message": f"{model} made {ws} web-search call(s) — search inflates "
                                       f"opus input tokens; consider a cheaper model for search turns"})
     return advice
+
+
+# ── signal_hint: worst light for the widget (green/yellow/red), no re-derive ─
+def compute_signal_hint(advice, per_model):
+    if any(a["kind"] == "model_mix_opus_heavy" for a in advice):
+        return "red"
+    if advice:
+        return "yellow"
+    return "green"
 
 
 # ── summary ─────────────────────────────────────────────────────────────────
@@ -249,6 +264,7 @@ def build_summary(date: str) -> dict:
         "missed_by_model": missed_rows,
         "advice": build_advice(rates, per_model, missed_rows, web_search_by_model)[:MAX_LIST],
     }
+    summary["signal_hint"] = compute_signal_hint(summary["advice"], per_model)
     moat_check(summary)          # refuse to return a dirty object
     return summary
 
@@ -258,7 +274,8 @@ def selftest() -> int:
     clean = {"schema_version": 1, "date": "2026-01-01", "generated_at": "x",
              "scanned": {"jsonl_files": 0, "usage_lines": 0, "deduped_calls": 0, "sessions": 0},
              "per_model": [], "total_cost_inr": 0.0,
-             "saved": {"inr": 0.0, "pct": 0.0}, "missed_by_model": [], "advice": []}
+             "saved": {"inr": 0.0, "pct": 0.0}, "missed_by_model": [], "advice": [],
+             "signal_hint": "green"}
     moat_check(clean)
     print("PASS clean summary accepted")
     planted = [

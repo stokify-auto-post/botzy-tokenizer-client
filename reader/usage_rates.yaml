@@ -35,3 +35,10 @@ families:
     output: 25.00
     cache_write: 6.25
     cache_read: 0.50
+
+# advice_thresholds — trigger points for build_advice() in jsonl_reader.py
+# (R13: nothing hardcoded — edit HERE, not in code).
+advice_thresholds:
+  missed_inr_min: 0.01   # cache_uncached_input fires when a model's missed-cache INR >= this
+  opus_share: 0.8        # model_mix_opus_heavy fires when opus_cost / total_cost > this
+  opus_cost_min: 1.0     # AND opus_cost (INR) must exceed this
