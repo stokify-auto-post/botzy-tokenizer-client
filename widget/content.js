@@ -28,7 +28,10 @@
     soundOn: CFG.soundOn,
     blinkOn: CFG.blinkOn,
     refreshSec: CFG.refreshSec,
-    spikeThresholdTokens: CFG.spikeThresholdTokens
+    spikeThresholdTokens: CFG.spikeThresholdTokens,
+    // CONTEXT-METER: which plan's context-window ceiling to measure against.
+    // Overridable in Settings; auto-calibrated by a detected compaction. R13.
+    contextPlan: (CFG.contextMeter && CFG.contextMeter.defaultPlan) || "200k"
   };
 
   function loadSettings(then) {
@@ -70,9 +73,22 @@
     bridgeDtach: [],     // [{name, alive, attached}] — HONEST dtach names, no mask
     bridgeAdvice: [],    // E2: reader's LOCAL advice — [{kind, message, model?, inr?}],
                          // outcome MESSAGES only, shown in TIPS when connected + has logs
-    bridgeServerAdvice: [] // E4: SERVER/ENGINE advice — [{kind, message, model?}],
+    bridgeServerAdvice: [], // E4: SERVER/ENGINE advice — [{kind, message, model?}],
                          // pulled by the reader from its own registry-tagged file,
                          // shown as a SEPARATE labelled layer above the local advice
+    // ---- CONTEXT-METER (dual-signal) — numbers/booleans only, no content -------
+    ctxPlan: null,            // resolved plan key ("200k" | "1m")
+    ctxCeiling: null,         // resolved context-window ceiling (tokens)
+    ctxPct: null,             // totalEstTokens / ceiling (0..1+); null until ceiling known
+    ctxNudged: false,         // 70% approach-nudge already fired (reset by a compaction)
+    ctxNudgeMsg: null,
+    ctxCompactions: 0,        // compaction events detected (count only)
+    ctxCompactionPresent: false, // marker currently in DOM (edge-trigger guard)
+    ctxCalibrated: false,     // ceiling confirmed/snapped by a detected compaction
+    // ---- SIGNAL LIGHT + PROACTIVE NUDGE — numbers/booleans only ----------------
+    recentSpike: false,       // true for CFG.blinkMs after a spike fires (drives red)
+    signalLevel: "green",     // "green" | "yellow" | "red" — recomputed every render
+    opusNudgeFired: false     // edge-trigger guard so the nudge blinks/beeps once
   };
 
   let orgId = null;     // resolved dynamically (per user), cached in storage
@@ -298,6 +314,9 @@
       setTimeout(() => mascot.classList.remove("botzy-spike"), CFG.blinkMs);
     }
     if (settings.soundOn) beep();
+    // drives the signal light red for a bit — cleared the same way as the blink
+    state.recentSpike = true;
+    setTimeout(() => { state.recentSpike = false; }, CFG.blinkMs);
     // numeric test/proof hook — count only
     document.documentElement.setAttribute("data-botzy-spike", String(state.spikeCount));
   }
@@ -387,6 +406,51 @@
     head.textContent = "BOTZY TOKENIZER";
     panel.appendChild(head);
 
+    // SIGNAL LIGHT (tri-color R/Y/G) — sits above the tabs so it's visible the
+    // instant the panel opens, whichever tab was last active. Colors/labels are
+    // ALL config-driven (R13); set as inline style so it renders correctly even
+    // without a matching panel.css rule (this widget's CSS ships separately).
+    const sigRow = document.createElement("div");
+    sigRow.id = "botzy-signal";
+    sigRow.className = "botzy-row";
+    const sigDot = document.createElement("span");
+    sigDot.id = "botzy-signal-dot";
+    sigDot.style.display = "inline-block";
+    sigDot.style.width = "10px";
+    sigDot.style.height = "10px";
+    sigDot.style.borderRadius = "50%";
+    sigDot.style.marginRight = "6px";
+    const sigLabel = document.createElement("span");
+    sigLabel.className = "botzy-val";
+    const sigWrap = document.createElement("span");
+    sigWrap.appendChild(sigDot);
+    sigWrap.appendChild(document.createTextNode("status"));
+    sigRow.appendChild(sigWrap);
+    sigRow.appendChild(sigLabel);
+    panel.appendChild(sigRow);
+    ui.signalDot = sigDot;
+    ui.signalLabel = sigLabel;
+
+    // PROACTIVE NUDGE + TEASER + CTA — one box, one nudge at a time (see
+    // renderNudge). Hidden by default; shown only on a real signal in state.
+    const nudgeBox = document.createElement("div");
+    nudgeBox.id = "botzy-nudge";
+    nudgeBox.style.display = "none";
+    const nudgeText = document.createElement("div");
+    nudgeText.className = "botzy-hint";
+    const nudgeCta = document.createElement("button");
+    nudgeCta.id = "botzy-nudge-cta";
+    nudgeCta.addEventListener("click", () => {
+      const tok = ui.bridgeTokenInput;
+      if (tok) { tok.scrollIntoView({ block: "center" }); tok.focus(); }
+    });
+    nudgeBox.appendChild(nudgeText);
+    nudgeBox.appendChild(nudgeCta);
+    panel.appendChild(nudgeBox);
+    ui.nudgeBox = nudgeBox;
+    ui.nudgeText = nudgeText;
+    ui.nudgeCta = nudgeCta;
+
     const tabbar = document.createElement("div");
     tabbar.className = "botzy-tabs";
     panel.appendChild(tabbar);
@@ -421,6 +485,9 @@
     ov.appendChild(emptyHint);
     ui.emptyHint = emptyHint;
     row(ov, "Spikes", "spikes");
+    // CONTEXT-METER (dual-signal): fill % of the context window + nudge note
+    row(ov, "Context window", "ctxWindow");
+    row(ov, "Context note", "ctxNote");
     // Gate 1/2 bridge: status line + HONEST dtach session list (real names)
     row(ov, "Bridge", "bridge");
     const dtachBox = document.createElement("div");
@@ -501,6 +568,7 @@
       pollBridge();
     });
     settingRow(st, "Bridge token", tokInput);
+    ui.bridgeTokenInput = tokInput; // nudge CTA scrolls/focuses here on "Connect"
     panel.appendChild(st);
 
     // hidden numeric proof hook (numbers only — used by automated tests)
@@ -540,6 +608,27 @@
     ui.total.textContent = noEst ? "—" : String(state.totalEstTokens);
     ui.last.textContent = state.lastEstTokens === null ? "—" : String(state.lastEstTokens);
     ui.spikes.textContent = String(state.spikeCount);
+    // CONTEXT-METER (dual-signal): "NN% of 200k · calibrated" + nudge/compaction note
+    if (ui.ctxWindow) {
+      if (state.ctxCeiling && state.ctxPct != null) {
+        const pct = Math.round(state.ctxPct * 100);
+        const ceilK = state.ctxCeiling >= 1000000
+          ? (state.ctxCeiling / 1000000) + "M"
+          : Math.round(state.ctxCeiling / 1000) + "k";
+        ui.ctxWindow.textContent = pct + "% of " + ceilK +
+          (state.ctxCalibrated ? " · calibrated" : "");
+        ui.ctxWindow.classList.toggle("botzy-warn",
+          pct >= Math.round(((CFG.contextMeter && CFG.contextMeter.nudgePct) || 0.70) * 100));
+      } else {
+        ui.ctxWindow.textContent = "—";
+      }
+    }
+    if (ui.ctxNote) {
+      const note = state.ctxNudged ? (state.ctxNudgeMsg || "approaching the safe point")
+        : (state.ctxCompactions > 0 ? ("compactions: " + state.ctxCompactions) : "ok");
+      ui.ctxNote.textContent = note;
+      ui.ctxNote.classList.toggle("botzy-warn", !!state.ctxNudged);
+    }
     if (ui.emptyHint) {
       if (noEst) {
         ui.emptyHint.textContent = (state.bridgeHasData === false)
@@ -552,6 +641,8 @@
     }
     renderBridge();
     renderAdvice();
+    renderSignal();
+    renderNudge();
 
     // rebuild log table (last displayLogRows rows, newest first)
     while (ui.logTable.rows.length > 1) ui.logTable.deleteRow(1);
@@ -649,7 +740,7 @@
     }
     if (!state.bridgePaired || state.bridgeNote) {
       // not connected -> basic monitoring only; don't pretend we have advice
-      hint("connect the local reader to see advice from your own logs");
+      hint((CFG.nudge && CFG.nudge.disconnectedHint) || "connect the local reader to see advice from your own logs");
       return;
     }
     // SERVER / ENGINE layer first (the unlock the bridge buys), if the engine has
@@ -669,9 +760,195 @@
     }
   }
 
+  // renderSignal — paints the tri-color dot + one-line label from
+  // state.signalLevel (computed in render() via computeSignalLevel()). Colors
+  // and labels come straight from CFG.signal (R13) — inline style, not a CSS
+  // class, so it renders correctly regardless of which stylesheet ships.
+  function renderSignal() {
+    if (!ui.signalDot) return;
+    const sg = CFG.signal || {};
+    const level = computeSignalLevel();
+    state.signalLevel = level;
+    const color = (sg.colors && sg.colors[level]) || "#9a9ab8";
+    const label = (sg.labels && sg.labels[level]) || level;
+    ui.signalDot.style.background = color;
+    ui.signalDot.className = "botzy-signal-" + level; // hook for a future CSS rule
+    if (ui.signalLabel) ui.signalLabel.textContent = label;
+    document.documentElement.setAttribute("data-botzy-signal", level); // proof hook
+  }
+
+  // renderNudge — ONE proactive box, non-spammy (edge-triggered blink/beep, not
+  // per-render). Priority: connected + opus-waste/spike advice > disconnected.
+  // The teaser line is deliberately short — never the advisor's full logic.
+  function renderNudge() {
+    if (!ui.nudgeBox) return;
+    const nd = CFG.nudge || {};
+    if (nd.enabled === false) { ui.nudgeBox.style.display = "none"; return; }
+    const connected = state.bridgePaired && !state.bridgeNote;
+    const opusWaste = connected && hasOpusWasteAdvice();
+    const spikeNow = connected && state.recentSpike;
+    if (opusWaste || spikeNow) {
+      if (!state.opusNudgeFired) {
+        state.opusNudgeFired = true;
+        if (settings.blinkOn && mascot) {
+          mascot.classList.add("botzy-spike");
+          setTimeout(() => mascot.classList.remove("botzy-spike"), CFG.blinkMs);
+        }
+        if (settings.soundOn) beep();
+      }
+      const opusPct = (typeof state.opusPct === "number") ? state.opusPct : 0;
+      const headline = spikeNow ? (nd.spikeCopy || "")
+        : (nd.opusCopy || "").replace("{opusPct}", String(opusPct));
+      ui.nudgeText.textContent = headline + " " + (nd.teaserCopy || "");
+      ui.nudgeCta.textContent = nd.ctaUpgradeLabel || "Upgrade";
+      ui.nudgeBox.style.display = "";
+    } else if (!connected) {
+      state.opusNudgeFired = false;
+      ui.nudgeText.textContent = nd.disconnectedHint || "connect the local reader to see advice from your own logs";
+      ui.nudgeCta.textContent = nd.ctaConnectLabel || "Connect to bridge";
+      ui.nudgeBox.style.display = "";
+    } else {
+      state.opusNudgeFired = false;
+      ui.nudgeBox.style.display = "none";
+    }
+  }
+
+  // ============================================================================
+  // CONTEXT-METER (dual-signal) — how full is the current context WINDOW.
+  //   Signal-1: DOM-estimate% (state.totalEstTokens / ceiling) -> 70% nudge.
+  //   Signal-2: compaction-detect (app's own marker) -> confirm-full + calibrate.
+  // MOAT: length-only estimate (chars/4, already computed); compaction detection
+  // matches a known marker phrase on a UI node — message content is never read here.
+  // ============================================================================
+  function resolveCeiling() {
+    const cm = CFG.contextMeter || {};
+    const plan = settings.contextPlan || cm.defaultPlan;
+    const ceil = (cm.plans && cm.plans[plan] != null) ? cm.plans[plan] : null;
+    state.ctxPlan = plan;
+    state.ctxCeiling = ceil;
+    return ceil;
+  }
+
+  // present? — true only when the app's OWN compaction marker is in the DOM.
+  function detectCompaction() {
+    const cm = CFG.contextMeter || {};
+    const pats = (cm.compactionTextPatterns || []).map((p) => p.toLowerCase());
+    for (const sel of (cm.compactionSelectors || [])) {
+      let els;
+      try { els = document.querySelectorAll(sel); } catch (e) { continue; }
+      for (const el of els) {
+        if (el.closest("#botzy-panel")) continue;       // never our own panel
+        // MOAT: we read the marker node's text ONLY to confirm the marker phrase;
+        // we keep a boolean, never the text, and never scan message bodies.
+        const t = (el.textContent || "").toLowerCase();
+        for (const p of pats) { if (t.indexOf(p) !== -1) return true; }
+      }
+    }
+    return false;
+  }
+
+  // On a detected compaction, snap the ceiling to the nearest known tier from the
+  // estimate-at-compaction (~190k->200k, ~950k->1M), within tolerance. R13 tiers.
+  function calibrateContextCeiling() {
+    const cm = CFG.contextMeter || {};
+    const tiers = cm.calibrationTiers || [];
+    const tol = (cm.toleranceFrac != null) ? cm.toleranceFrac : 0.10;
+    const est = state.totalEstTokens;
+    let best = null;
+    for (const tier of tiers) {
+      if (Math.abs(est - tier) <= tier * tol) {
+        if (best === null || Math.abs(est - tier) < Math.abs(est - best)) best = tier;
+      }
+    }
+    if (best === null) return false;
+    state.ctxCeiling = best;
+    state.ctxCalibrated = true;
+    const plans = cm.plans || {};
+    for (const k of Object.keys(plans)) {
+      if (plans[k] === best) { state.ctxPlan = k; settings.contextPlan = k; saveSettings(); break; }
+    }
+    return true;
+  }
+
+  function fireContextNudge() {
+    const cm = CFG.contextMeter || {};
+    const pct = Math.round((state.ctxPct || 0) * 100);
+    if (settings.blinkOn && mascot) {
+      mascot.classList.add("botzy-spike");
+      setTimeout(() => mascot.classList.remove("botzy-spike"), CFG.blinkMs);
+    }
+    if (settings.soundOn) beep();
+    state.ctxNudgeMsg = (cm.nudgeCopy || "")
+      .replace("{pct}", String(pct))
+      .replace("{ceiling}", String(settings.contextPlan || state.ctxPlan || ""));
+    // numeric/boolean test+proof hooks (count + pct only; never content)
+    document.documentElement.setAttribute("data-botzy-ctx-nudge", String(pct));
+  }
+
+  function computeContextMeter() {
+    const cm = CFG.contextMeter || {};
+    if (cm.enabled === false) return;
+    resolveCeiling();
+    // Signal-2: compaction (edge-triggered so a persistent marker counts once).
+    const present = detectCompaction();
+    if (present && !state.ctxCompactionPresent) {
+      state.ctxCompactions += 1;
+      calibrateContextCeiling();   // confirm-full -> snap ceiling to nearest tier
+      state.ctxNudged = false;     // window has room again after a compaction
+    }
+    state.ctxCompactionPresent = present;
+    // Signal-1: DOM-estimate% of the ceiling -> 70% approach-nudge (once until reset).
+    if (state.ctxCeiling) {
+      state.ctxPct = state.totalEstTokens / state.ctxCeiling;
+      if (state.ctxPct >= (cm.nudgePct != null ? cm.nudgePct : 0.70) && !state.ctxNudged) {
+        state.ctxNudged = true;
+        fireContextNudge();
+      }
+    }
+    // expose the live fill % for the proof hook (rounded; number only)
+    if (state.ctxPct != null) {
+      document.documentElement.setAttribute("data-botzy-ctx-pct",
+        String(Math.round(state.ctxPct * 100)));
+    }
+  }
+
+  // ============================================================================
+  // SIGNAL LIGHT (tri-color R/Y/G) — one glance health read, from EXISTING state
+  // only (usage %, contextMeter, advice). Thresholds/colors/labels all in config.
+  // ============================================================================
+  function computeSignalLevel() {
+    const sg = CFG.signal || {};
+    if (sg.enabled === false) return "green";
+    const hard = (sg.hardBreachPct != null) ? sg.hardBreachPct : 100;
+    const soft = (sg.breachPct != null) ? sg.breachPct : 90;
+    const pcts = [state.sessionPct, state.weeklyPct, state.sonnetPct, state.opusPct]
+      .filter((v) => typeof v === "number");
+    const hardBreach = pcts.some((v) => v >= hard);
+    const softBreach = pcts.some((v) => v >= soft);
+    const opusWaste = hasOpusWasteAdvice();
+    if (state.recentSpike || opusWaste || hardBreach) return "red";
+    const ctxWarm = state.ctxPct != null &&
+      state.ctxPct >= ((CFG.contextMeter && CFG.contextMeter.nudgePct) || 0.70);
+    if (ctxWarm || softBreach) return "yellow";
+    return "green";
+  }
+
+  // true when the reader's advice (local or server layer) is tagged as Opus-waste,
+  // or (fallback, no tagged advice yet) the weekly Opus utilization itself is high.
+  function hasOpusWasteAdvice() {
+    const nd = CFG.nudge || {};
+    const kinds = nd.opusAdviceKinds || [];
+    const tagged = state.bridgeAdvice.concat(state.bridgeServerAdvice)
+      .some((a) => kinds.indexOf(a.kind) !== -1);
+    if (tagged) return true;
+    const thresh = (nd.opusPctThreshold != null) ? nd.opusPctThreshold : 30;
+    return typeof state.opusPct === "number" && state.opusPct >= thresh;
+  }
+
   function refresh() {
     scanModel();
     trackMessages();
+    computeContextMeter();   // dual-signal context-window meter (length-only, MOAT-safe)
     // Endpoint is the source of truth. Modal DOM-scrape is a FALLBACK, used only
     // while the endpoint hasn't succeeded (before first poll, or after a fail).
     if (!state.lastPollOk) scanUsage();

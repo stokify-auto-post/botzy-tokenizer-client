@@ -122,6 +122,88 @@ const BOTZY_CONFIG = {
     pollSec: 300         // reuse the usage-endpoint cadence (api.pollSec); +on-load
   },
 
+  // ---- CONTEXT-METER (dual-signal, v0.3.1) — R13 ------------------------------
+  // A SECOND, distinct meter from the usage % above. It estimates how full the
+  // current conversation's CONTEXT WINDOW is, so a handoff can be prompted BEFORE
+  // the window fills (BANYAN-018). Data-source is the SAME length-only DOM estimate
+  // already computed for the chat log (state.totalEstTokens = sum of chars/4 over
+  // messages) divided by the plan's context-window ceiling — NOT the /usage API.
+  //
+  // MOAT: estimate is LENGTH-only (chars/4); message text is never stored or sent.
+  // Compaction detection matches the app's OWN marker element (a known phrase on a
+  // UI node), reading only whether the marker is present — never message content.
+  contextMeter: {
+    enabled: true,
+    // plan -> context-window ceiling (tokens). The plan is a user setting; until
+    // a plan is chosen (or a compaction calibrates it) defaultPlan is used. R13:
+    // edit the tiers HERE, never in content.js.
+    plans: {
+      "200k": 200000,    // 2000-msg / 10k plan  -> 200k context window
+      "1m":   1000000    // 20k plan             -> 1M  context window
+    },
+    defaultPlan: "200k",
+    // Signal-1: DOM-estimate% of the ceiling at/above this fraction => approach-nudge.
+    nudgePct: 0.70,
+    // Signal-2: COMPACTION detect. claude.ai injects a compaction marker when it
+    // auto-compacts the conversation; detecting it CONFIRMS the window was full and
+    // lets us auto-calibrate the ceiling to the nearest known tier (~190k->200k,
+    // ~950k->1M). Selectors find the marker NODE; a pattern confirms it is really a
+    // compaction marker (never a scan of message content).
+    compactionSelectors: [
+      '[data-testid*="compact" i]',
+      '[aria-label*="compact" i]',
+      '[class*="compact" i]'
+    ],
+    compactionTextPatterns: [
+      "compacted", "compacting", "conversation was compacted",
+      "summarized earlier", "earlier messages were summarized"
+    ],
+    // calibration tiers: on a compaction at ~X tokens, snap the ceiling to the
+    // nearest tier within toleranceFrac. ±5-10% is acceptable (estimate is rough).
+    calibrationTiers: [200000, 1000000],
+    toleranceFrac: 0.10,
+    // copy shown on the 70% approach-nudge ({pct}/{ceiling} substituted at render).
+    nudgeCopy: "Context ~{pct}% of the {ceiling} window — approaching the safe point. Save a handoff and start a fresh session (BANYAN-018)."
+  },
+
+  // ---- SIGNAL LIGHT (tri-color R/Y/G, v0.3.1) — R13 ---------------------------
+  // One glance health indicator, computed fresh every refresh from EXISTING state
+  // (usage %, contextMeter, advice) — no new scanning/network. Thresholds + copy
+  // are ALL here so the bar can be retuned without touching content.js.
+  signal: {
+    enabled: true,
+    // any usage row (session/weekly/sonnet/opus %) at/above this -> at least yellow
+    breachPct: 90,
+    // any usage row at/above this -> red (hard breach)
+    hardBreachPct: 100,
+    colors: { green: "#2ecc71", yellow: "#ffaa28", red: "#ff3b30" },
+    labels: {
+      green: "healthy",
+      yellow: "usage creeping — check Overview",
+      red: "action needed"
+    }
+  },
+
+  // ---- PROACTIVE NUDGE + TEASER + CTA (v0.3.1) — R13 --------------------------
+  // Shown ABOVE the tabs so it's visible the moment the panel opens. Fires ONLY
+  // on a real signal already in state (bridge advice / spike) — never spammy,
+  // one nudge at a time (see content.js priority: spike > opus-waste > disconnected).
+  // Copy is templated ({opusPct} substituted at render); the teaser line is
+  // deliberately SHORT — it never reveals the advisor's underlying logic.
+  nudge: {
+    enabled: true,
+    // advice.kind values (from the reader/engine) treated as "Opus waste" signals
+    opusAdviceKinds: ["opus_waste", "opus-heavy", "opus_spend"],
+    // fallback signal if no advice item is tagged: weekly Opus utilization itself
+    opusPctThreshold: 30,
+    opusCopy: "Opus {opusPct}% of this week's model usage.",
+    spikeCopy: "Token spike just detected on this message.",
+    teaserCopy: "Connect to unlock a ~savings insight.",
+    ctaConnectLabel: "Connect to bridge",
+    ctaUpgradeLabel: "Upgrade for full insight",
+    disconnectedHint: "connect the local reader to see advice from your own logs"
+  },
+
   // ---- test hook: auto-open panel (set true only by the test harness) ---------
   debugAutoOpen: false
 };
