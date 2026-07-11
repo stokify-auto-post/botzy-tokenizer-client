@@ -1,0 +1,23 @@
+# botzy_signal_config.yaml — thresholds/colors/copy for the Botzy statusline fragment
+# (R13: nothing hardcoded — edit HERE, not in botzy_signal.sh).
+#
+# Flat scalars only (the shell parser is a plain grep/sed, no yaml nesting).
+# Colors are ANSI escapes written as literal "\033[..m" text; the script
+# expands them with `printf '%b'` before use.
+
+symbol_green: "🟢"
+symbol_yellow: "🟡"
+symbol_red: "🔴"
+symbol_off: "⚪"
+
+color_green: "\033[32m"
+color_yellow: "\033[33m"
+color_red: "\033[31m"
+color_off: "\033[2m"
+
+currency_prefix: "₹"
+separator: " · "
+advice_max_len: 40      # truncate advice.message beyond this many chars (+ "…")
+off_text: "botzy off"   # shown when the reader is unreachable/erroring/missing
+
+reader_timeout_ms: 250  # hard budget for the jsonl_reader.py CLI call (fail-silent past this)
