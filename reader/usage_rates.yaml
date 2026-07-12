@@ -42,3 +42,4 @@ advice_thresholds:
   missed_inr_min: 0.01   # cache_uncached_input fires when a model's missed-cache INR >= this
   opus_share: 0.8        # model_mix_opus_heavy fires when opus_cost / total_cost > this
   opus_cost_min: 1.0     # AND opus_cost (INR) must exceed this
+  yellow_min_inr: 50     # signal_hint: yellow only when total advice severity (INR) >= this

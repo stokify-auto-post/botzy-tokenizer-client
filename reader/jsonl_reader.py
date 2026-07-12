@@ -208,10 +208,11 @@ def build_advice(rates, per_model, missed_rows, web_search_by_model):
 
 
 # ── signal_hint: worst light for the widget (green/yellow/red), no re-derive ─
-def compute_signal_hint(advice, per_model):
+def compute_signal_hint(advice, per_model, yellow_min_inr=50.0):
     if any(a["kind"] == "model_mix_opus_heavy" for a in advice):
         return "red"
-    if advice:
+    total_severity = sum(float(a.get("severity") or a.get("inr") or 0) for a in advice)
+    if total_severity >= yellow_min_inr:
         return "yellow"
     return "green"
 
@@ -264,7 +265,9 @@ def build_summary(date: str) -> dict:
         "missed_by_model": missed_rows,
         "advice": build_advice(rates, per_model, missed_rows, web_search_by_model)[:MAX_LIST],
     }
-    summary["signal_hint"] = compute_signal_hint(summary["advice"], per_model)
+    th = rates.get("advice_thresholds") or {}
+    yellow_min_inr = float(th.get("yellow_min_inr", 50))
+    summary["signal_hint"] = compute_signal_hint(summary["advice"], per_model, yellow_min_inr)
     moat_check(summary)          # refuse to return a dirty object
     return summary
 
