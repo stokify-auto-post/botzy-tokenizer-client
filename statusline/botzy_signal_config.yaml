@@ -20,4 +20,5 @@ separator: " · "
 advice_max_len: 40      # truncate advice.message beyond this many chars (+ "…")
 off_text: "botzy off"   # shown when the reader is unreachable/erroring/missing
 
-reader_timeout_ms: 250  # hard budget for the jsonl_reader.py CLI call (fail-silent past this)
+reader_timeout_ms: 2000  # hard budget for the jsonl_reader.py CLI call (fail-silent past this)
+cache_ttl_s: 30           # seconds the rendered fragment is cached; reader only re-walks past this age

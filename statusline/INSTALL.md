@@ -18,10 +18,15 @@ any one of these silently degrades to `⚪ botzy off`.
 
 Thresholds/colors/copy live in `statusline/botzy_signal_config.yaml`
 (R13 — edit the yaml, not the script). Notably `reader_timeout_ms` (default
-250) is the hard budget for the reader CLI call; raise it if your `reader/out/`
+2000) is the hard budget for the reader CLI call; raise it if your `reader/out/`
 log volume is large enough that the live scan misses that window (you'll see
 `⚪ botzy off` constantly if so — check with
 `time python3 reader/jsonl_reader.py --date $(date -u +%F) >/dev/null`).
+
+The fragment self-caches to `${TMPDIR:-/tmp}/botzy_signal_<uid>.cache` for
+`cache_ttl_s` seconds (default 30) — the reader only re-walks once per TTL
+window, so every render in between is an instant file read even on machines
+with a large `~/.claude/projects`.
 
 ## Fresh install (no existing statusline)
 
