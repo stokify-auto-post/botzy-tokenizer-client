@@ -16,6 +16,7 @@ def load_cfg(path=DEFAULT_CFG):
            "token_file":os.path.join(HERE,".bridge_token"),
            "allowed_extension_origin":"chrome-extension://REPLACE_WITH_EXTENSION_ID",
            "state_path":"/v1/state","pair_path":"/v1/pair",
+           "skeleton_consent_path":"/v1/consent/skeleton",
            "dtach_dir":"/tmp","dtach_prefix":"dtach-"}
     if yaml and os.path.exists(path):
         with open(path) as f: loaded = yaml.safe_load(f) or {}
@@ -199,7 +200,39 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type","application/json")
         self.send_header("Access-Control-Allow-Origin", self.cfg["allowed_extension_origin"])
         self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)
-    def do_POST(self): self._deny(405)
+    def _skeleton(self):
+        # POST /v1/consent/skeleton — user-consented, one-shot SHAPE read+upload
+        # of a project_root the widget names. Same bearer-token gate as /v1/state.
+        # Reads paths/sizes/kinds only (skeleton_reader) — never file contents.
+        auth=self.headers.get("Authorization",""); presented=auth[7:] if auth.startswith("Bearer ") else ""
+        if not (presented and hmac.compare_digest(presented, self.token)): return self._deny(401)
+        length=int(self.headers.get("Content-Length") or 0)
+        raw=self.rfile.read(length) if length > 0 else b""
+        try:
+            data=json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            return self._deny(400)
+        project_root=data.get("project_root")
+        if not isinstance(project_root,str) or not os.path.isdir(project_root):
+            return self._deny(400)
+        try:
+            import skeleton_reader
+            skel=skeleton_reader.read_skeleton(project_root)
+        except Exception:
+            return self._deny(400)
+        uploaded=False; reason="not-attempted"
+        try:
+            import skeleton_uploader
+            res=skeleton_uploader.upload_skeleton(project_root, server_base=self.cfg.get("server_base"))
+            uploaded=bool(res.get("ok")); reason=res.get("reason","")
+        except Exception as e:
+            reason=str(e)
+        return self._ok({"ok":True,"files_read":skel["total_files"],
+                         "uploaded":uploaded,"reason":reason})
+    def do_POST(self):
+        if self.path == self.cfg.get("skeleton_consent_path","/v1/consent/skeleton"):
+            return self._skeleton()
+        return self._deny(405)
     do_PUT=do_POST; do_DELETE=do_POST; do_PATCH=do_POST
     def do_GET(self):
         # Unauthenticated liveness probe — no data, just {"ok":true}. Lets the
